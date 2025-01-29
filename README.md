@@ -1,1 +1,1 @@
-# Saflow-eBPF-MPTCP-scheduler
+# Saflow eBPF-based MPTCP scheduler
