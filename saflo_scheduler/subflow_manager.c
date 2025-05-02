@@ -467,9 +467,10 @@ int main(int argc, char *argv[]) {
     int opt;
     int time_interval = 0;
     float max_p = 0.0, min_p = 0.0;
+    int enable_detection = 0; // Default: disabled
 
     // Parse command-line arguments
-    while ((opt = getopt(argc, argv, "i:x:n:")) != -1) {
+    while ((opt = getopt(argc, argv, "i:x:n:d:")) != -1) {
         switch (opt) {
         case 'i': // Time Interval
             time_interval = atoi(optarg);
@@ -480,19 +481,25 @@ int main(int argc, char *argv[]) {
         case 'n': // Min Probability
             min_p = atof(optarg);
             break;
-	default: // Invalid option
-            fprintf(stderr, "Usage: %s -i <time_interval> -x <max_p> -n <min_p>\n", argv[0]);
-            fprintf(stderr, "Example: sudo ./subflow_manager -i 500000 -x 0.8 -n 0.2\n");
-	    exit(EXIT_FAILURE);
+        case 'd': // Enable/Disable Detection
+            enable_detection = atoi(optarg);
+            if (enable_detection != 0 && enable_detection != 1) {
+                fprintf(stderr, "Error: Detection flag (-d) must be 0 (disable) or 1 (enable).\n");
+                exit(EXIT_FAILURE);
+            }
+            break;
+        default: // Invalid option
+            fprintf(stderr, "Usage: %s -i <time_interval> -x <max_p> -n <min_p> -d <enable_detection>\n", argv[0]);
+            fprintf(stderr, "Example: sudo ./subflow_manager -i 500000 -x 0.8 -n 0.2 -d 1\n");
+            exit(EXIT_FAILURE);
         }
     }
 
     // Check if all required arguments are provided
     if (time_interval == 0 || max_p == 0.0 || min_p == 0.0) {
         fprintf(stderr, "All options (-i, -x, -n) must be provided.\n");
-        fprintf(stderr, "Usage: %s -i <time_interval(μs)> -x <max_p> -n <min_p>\n", argv[0]);
-        fprintf(stderr, "Example: sudo ./subflow_manager -i 500000 -x 0.8 -n 0.2\n");
-	exit(EXIT_FAILURE);
+        fprintf(stderr, "Usage: %s -i <time_interval(μs)> -x <max_p> -n <min_p> -d <enable_detection>\n", argv[0]);
+        exit(EXIT_FAILURE);
     }
 
     // Display the parsed values
@@ -500,12 +507,7 @@ int main(int argc, char *argv[]) {
     printf("Time Interval: %d microseconds\n", time_interval);
     printf("Max Probability: %.2f\n", max_p);
     printf("Min Probability: %.2f\n", min_p);
-
-    // Additional validation
-    if (max_p <= min_p) {
-        fprintf(stderr, "Error: Max Probability must be greater than Min Probability.\n");
-        exit(EXIT_FAILURE);
-    }    
+    printf("Attack Detection: %s\n", enable_detection ? "Enabled" : "Disabled");    
 
     // Parent process: Consumer
     //  + This is the main process that actually manages MPTCP subflows.
@@ -552,114 +554,158 @@ int main(int argc, char *argv[]) {
     //Start of while
     while(true)
     {
-        /////////////////////////////////////////////////////////////////////////////////////////////////
-        // Start of attack detection ////////////////////////////////////////////////////////////////////
-        /////////////////////////////////////////////////////////////////////////////////////////////////
-        // Open the BPF map for detection
-        detection_map_fd = bpf_obj_get(DETECTION_MAP_PATH);
-        if (detection_map_fd < 0) {
-            perror("Failed to open Detection BPF map");
-            return 1;
-        }
-        // Write the burst (traffic) data in to log file
-        uint32_t burst;
-        FILE *log_file = fopen(log_file_path, "a");
-        if (!log_file) {
-            perror("Failed to open detection.log");
-            return 1; // Exit the loop if the file cannot be opened
-        }
-        do {
-            // Lookup the value for the current key
-            if (bpf_map_lookup_elem(detection_map_fd, &detection_key, &burst) == 0) {
-                // Open the log file in append mode
-
-
-                // Write the data to the file
-                fprintf(log_file, "token:%u time:%lu burst:%u\n", detection_key.token, detection_key.timestamp_ns, burst);
-
-                // Delete the processed key from the map
-                if (bpf_map_delete_elem(detection_map_fd, &detection_key) < 0) {
-                    perror("Failed to delete map element.");
-                }
-            } 
-            // else {
-            //     perror("Failed to lookup map element from detection map. This is fine if there is no active subflow.");
-            // }
-        } while (bpf_map_get_next_key(detection_map_fd, &detection_key, &detection_next_key) == 0 && (detection_key = detection_next_key, 1));
-        close(detection_map_fd);
-        // Close the log file
-        fclose(log_file);
-
-        // Read the list of malicious tokens
-        const char *at_shm_name = "shm_detect";  // Shared memory for attck detection
-        size_t size = 4000;  // Size in bytes (must match Python)
-        // Open the shared memory block
-        int at_shm_fd = shm_open(at_shm_name, O_RDONLY, 0666);
-        if (at_shm_fd == -1) {
-            perror("Failed to open shared memory for detection: the attack detector may be terminated.");
-            return 1;
-        }
-        // Map the shared memory block
-        void *at_shm_ptr = mmap(NULL, size, PROT_READ, MAP_SHARED, at_shm_fd, 0);
-        if (at_shm_ptr == MAP_FAILED) {
-            perror("Failed to map shared memory for detection");
-            close(at_shm_fd);
-            return 1;
-        }
-        // Access the data
-        int *at_data = (int *)at_shm_ptr;
-        size_t num_integers = size / sizeof(uint32_t);  // Calculate the number of integers
-        uint32_t *malicious_tokens = malloc(size);  // Allocate memory for the local copy
-        if (malicious_tokens == NULL) {
-            perror("Failed to allocate memory for local copy");
-            munmap(at_shm_ptr, size);
-            close(at_shm_fd);
-            return 1;
-        }
-        else{
-            memcpy(malicious_tokens, at_data, size);  // Copy shared memory data to the local array
-        }
-        close(at_shm_fd);
-
-        // Open the BPF map
-        map_fd = bpf_obj_get(SAFLO_MAP_PATH);
-        if (map_fd < 0) {
-            perror("Failed to open BPF map");
-            return 1;
-        }
-    
-        // Iterate through all keys in the map
-        if (bpf_map_get_next_key(map_fd, NULL, &map_key) < 0) {
-            printf("There is no MPTCP connection. Wait....\n");
-            close(map_fd);
-            sleep(2);
-            continue;
-        }
-
-        do {
-            if (bpf_map_lookup_elem(map_fd, &map_key, &map_value) == 0) {
-                ///////////////////////////////////////////////////
-                // Mark if token is unsafe ///////////////////////
-                //////////////////////////////////////////////////
-                for (int z = 0; z < num_integers; z ++){
-                    if (malicious_tokens[z] == 0) break;
-                    else if (malicious_tokens[z] == map_key.token){
-                        // If the subflow is a secured endpoint, we just leave it operate.
-                        if (map_key.local_id == 0 && map_key.remote_id == 0) continue;
-                        map_value.safe = 0;
-                        bpf_map_update_elem(map_fd, &map_key, &map_value, BPF_ANY);
-                        break;
-                    }
-                }
-                hash_table_insert(&sf_table, map_key.token, map_key.local_id, map_key.remote_id);
-            } else {
-                perror("Failed to list up map element");
+        if(enable_detection>0){
+            /////////////////////////////////////////////////////////////////////////////////////////////////
+            // Start of attack detection ////////////////////////////////////////////////////////////////////
+            /////////////////////////////////////////////////////////////////////////////////////////////////
+            // Open the BPF map for detection
+            detection_map_fd = bpf_obj_get(DETECTION_MAP_PATH);
+            if (detection_map_fd < 0) {
+                perror("Failed to open Detection BPF map");
+                return 1;
             }
-        } while (bpf_map_get_next_key(map_fd, &map_key, &map_next_key) == 0 && (map_key = map_next_key, 1));
-        /////////////////////////////////////////////////////////////////////////////////////////////////
-        // End of attack detection //////////////////////////////////////////////////////////////////////
-        /////////////////////////////////////////////////////////////////////////////////////////////////
+            // Write the burst (traffic) data in to log file
+            uint32_t burst;
+            FILE *log_file = fopen(log_file_path, "a");
+            if (!log_file) {
+                perror("Failed to open detection.log");
+                return 1; // Exit the loop if the file cannot be opened
+            }
+            do {
+                // Lookup the value for the current key
+                if (bpf_map_lookup_elem(detection_map_fd, &detection_key, &burst) == 0) {
+                    // Open the log file in append mode
 
+
+                    // Write the data to the file
+                    fprintf(log_file, "token:%u time:%lu burst:%u\n", detection_key.token, detection_key.timestamp_ns, burst);
+
+                    // Delete the processed key from the map
+                    if (bpf_map_delete_elem(detection_map_fd, &detection_key) < 0) {
+                        perror("Failed to delete map element.");
+                    }
+                } 
+                // else {
+                //     perror("Failed to lookup map element from detection map. This is fine if there is no active subflow.");
+                // }
+            } while (bpf_map_get_next_key(detection_map_fd, &detection_key, &detection_next_key) == 0 && (detection_key = detection_next_key, 1));
+            close(detection_map_fd);
+            // Close the log file
+            fclose(log_file);
+
+            // Read the list of malicious tokens
+            const char *at_shm_name = "shm_detect";  // Shared memory for attck detection
+            size_t size = 4000;  // Size in bytes (must match Python)
+            // Open the shared memory block
+            int at_shm_fd = shm_open(at_shm_name, O_RDONLY, 0666);
+            if (at_shm_fd == -1) {
+                perror("Failed to open shared memory for detection: the attack detector may be terminated.");
+                return 1;
+            }
+            // Map the shared memory block
+            void *at_shm_ptr = mmap(NULL, size, PROT_READ, MAP_SHARED, at_shm_fd, 0);
+            if (at_shm_ptr == MAP_FAILED) {
+                perror("Failed to map shared memory for detection");
+                close(at_shm_fd);
+                return 1;
+            }
+            // Access the data
+            int *at_data = (int *)at_shm_ptr;
+            size_t num_integers = size / sizeof(uint32_t);  // Calculate the number of integers
+            uint32_t *malicious_tokens = malloc(size);  // Allocate memory for the local copy
+            if (malicious_tokens == NULL) {
+                perror("Failed to allocate memory for local copy");
+                munmap(at_shm_ptr, size);
+                close(at_shm_fd);
+                return 1;
+            }
+            else{
+                memcpy(malicious_tokens, at_data, size);  // Copy shared memory data to the local array
+            }
+            close(at_shm_fd);
+
+            // Open the BPF map
+            map_fd = bpf_obj_get(SAFLO_MAP_PATH);
+            if (map_fd < 0) {
+                perror("Failed to open BPF map");
+                return 1;
+            }
+        
+            // Iterate through all keys in the map
+            if (bpf_map_get_next_key(map_fd, NULL, &map_key) < 0) {
+                printf("There is no MPTCP connection. Wait....\n");
+                close(map_fd);
+                sleep(2);
+                continue;
+            }
+
+            do {
+                if (bpf_map_lookup_elem(map_fd, &map_key, &map_value) == 0) {
+                    ///////////////////////////////////////////////////
+                    // Mark if token is unsafe ///////////////////////
+                    //////////////////////////////////////////////////
+                    for (int z = 0; z < num_integers; z ++){
+                        if (malicious_tokens[z] == 0) break;
+                        else if (malicious_tokens[z] == map_key.token){
+                            // If the subflow is a secured endpoint, we just leave it operate.
+                            if (map_key.local_id == 0 && map_key.remote_id == 0) continue;
+                            map_value.safe = 0;
+                            bpf_map_update_elem(map_fd, &map_key, &map_value, BPF_ANY);
+                            break;
+                        }
+                    }
+                    hash_table_insert(&sf_table, map_key.token, map_key.local_id, map_key.remote_id);
+                } else {
+                    perror("Failed to list up map element");
+                }
+            } while (bpf_map_get_next_key(map_fd, &map_key, &map_next_key) == 0 && (map_key = map_next_key, 1));
+            /////////////////////////////////////////////////////////////////////////////////////////////////
+            // End of attack detection //////////////////////////////////////////////////////////////////////
+            /////////////////////////////////////////////////////////////////////////////////////////////////
+        }
+        else{ //Detection is not enabled
+            // Open the BPF map for detection
+            detection_map_fd = bpf_obj_get(DETECTION_MAP_PATH);
+            if (detection_map_fd < 0) {
+                perror("Failed to open Detection BPF map");
+                return 1;
+            }
+            uint32_t burst;
+            do {
+                // Lookup the value for the current key
+                if (bpf_map_lookup_elem(detection_map_fd, &detection_key, &burst) == 0) {
+                    // Delete the processed key from the map
+                    if (bpf_map_delete_elem(detection_map_fd, &detection_key) < 0) {
+                        perror("Failed to delete map element.");
+                    }
+                } 
+
+            } while (bpf_map_get_next_key(detection_map_fd, &detection_key, &detection_next_key) == 0 && (detection_key = detection_next_key, 1));
+            close(detection_map_fd);
+            // Close the log file
+
+            // Open the BPF map
+            map_fd = bpf_obj_get(SAFLO_MAP_PATH);
+            if (map_fd < 0) {
+                perror("Failed to open BPF map");
+                return 1;
+            }
+        
+            // Iterate through all keys in the map
+            if (bpf_map_get_next_key(map_fd, NULL, &map_key) < 0) {
+                printf("There is no MPTCP connection. Wait....\n");
+                close(map_fd);
+                sleep(2);
+                continue;
+            }
+            do {
+                if (bpf_map_lookup_elem(map_fd, &map_key, &map_value) == 0) {
+                    hash_table_insert(&sf_table, map_key.token, map_key.local_id, map_key.remote_id);
+                } else {
+                    perror("Failed to list up map element");
+                }
+            } while (bpf_map_get_next_key(map_fd, &map_key, &map_next_key) == 0 && (map_key = map_next_key, 1));
+        }
 
         /////////////////////////////////////////////////////////////////////////////////////////////////
         // Start of random decision for subflows ////////////////////////////////////////////////////////
