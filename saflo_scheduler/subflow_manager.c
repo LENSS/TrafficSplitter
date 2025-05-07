@@ -835,13 +835,13 @@ int main(int argc, char *argv[]) {
         round_idx += 1;
         if (round_idx > 59){
             round_idx=0;
-
-            if (delete_file_with_lock(log_file_path) == 0) {
-                printf("Detection log deleted with lock successfully.\n");
-            } else {
-                printf("Failed to delete Detection log with lock.\n");
+            if(enable_detection>0){
+                if (delete_file_with_lock(log_file_path) == 0) {
+                    printf("Detection log deleted with lock successfully.\n");
+                } else {
+                    printf("Failed to delete Detection log with lock.\n");
+                }
             }
-
         }
         // Delete all entry in hash.
         hash_table_clear(&sf_table);
