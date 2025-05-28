@@ -13,8 +13,44 @@
 #include <errno.h>
 #include <sys/select.h>
 #include <arpa/inet.h>
+#include <signal.h>
 
 #define BUF_SIZE 4096
+const char *g_dns_ip = NULL;
+const char *g_tun_name = NULL;
+
+void cleanup(int signo) {
+    char cmd[256];
+
+    if (g_dns_ip && g_tun_name) {
+        // Restore resolv.conf
+        system("cp /etc/resolv.conf.backup /etc/resolv.conf");
+        system("rm -f /etc/resolv.conf.backup");
+
+        // Remove static route for DNS
+        snprintf(cmd, sizeof(cmd), "ip route del %s dev %s", g_dns_ip, g_tun_name);
+        system(cmd);
+
+        // Remove default route through TUN
+        snprintf(cmd, sizeof(cmd), "ip route del default dev %s", g_tun_name);
+        system(cmd);
+
+        // Bring down TUN
+        snprintf(cmd, sizeof(cmd), "ip link set %s down", g_tun_name);
+        system(cmd);
+    }
+    if (signo==0)
+        printf("[*] Cleanup triggered. Exiting.\n");
+    else
+        printf("[*] Cleanup triggered by signal %d. Exiting.\n", signo);
+    exit(0);
+}
+
+
+void setup_signal_handlers() {
+    signal(SIGINT, cleanup);
+    signal(SIGTERM, cleanup);
+}
 
 // Create a TUN device
 int tun_alloc(char *dev) {
@@ -44,7 +80,9 @@ int tun_alloc(char *dev) {
 }
 
 // Connect to server using TCP (MPTCP-enabled kernel handles subflows)
-int tcp_connect(const char *server_ip, int port, char *assigned_ip, size_t ip_len) {
+int tcp_connect(const char *server_ip, int port,
+                char *assigned_ip, size_t ip_len,
+                char *dns_ip, size_t dns_ip_len) {
     int sock;
     struct sockaddr_in server;
 
@@ -63,21 +101,113 @@ int tcp_connect(const char *server_ip, int port, char *assigned_ip, size_t ip_le
         exit(1);
     }
 
-    // Read assigned IP
-    ssize_t n = read(sock, assigned_ip, ip_len - 1);
+    // Read both IP and DNS IP
+    char buffer[128];
+    ssize_t n = read(sock, buffer, sizeof(buffer) - 1);
     if (n <= 0) {
-        perror("Failed to read assigned IP");
+        perror("Failed to read IP/DNS info");
+        close(sock);
+        exit(1);
+    }
+    buffer[n] = '\0';
+
+    // Parse lines
+    char *line1 = strtok(buffer, "\n");
+    char *line2 = strtok(NULL, "\n");
+
+    if (!line1 || !line2) {
+        fprintf(stderr, "[-] Invalid setup message format received from server\n");
         close(sock);
         exit(1);
     }
 
-    // Null-terminate and strip newline if present
-    assigned_ip[n] = '\0';
-    char *newline = strchr(assigned_ip, '\n');
-    if (newline) *newline = '\0';
+    strncpy(assigned_ip, line1, ip_len - 1);
+    assigned_ip[ip_len - 1] = '\0';
+
+    strncpy(dns_ip, line2, dns_ip_len - 1);
+    dns_ip[dns_ip_len - 1] = '\0';
+
+    printf("[*] Assigned IP: %s\n", assigned_ip);
+    printf("[*] DNS Server:  %s\n", dns_ip);
 
     return sock;
 }
+
+int read_framed_packet(int fd, char *buf, int maxlen) {
+    uint8_t hdr[2];
+    int ret = 0, read_hdr = 0;
+
+    // Read exactly 2 bytes for header
+    while (read_hdr < 2) {
+        ret = read(fd, hdr + read_hdr, 2 - read_hdr);
+        if (ret == 0) {
+            fprintf(stderr, "[DEBUG] read_framed_packet: EOF while reading length header (fd=%d)\n", fd);
+            return -1;
+        } else if (ret < 0) {
+            fprintf(stderr, "[DEBUG] read_framed_packet: Error reading length header (fd=%d): %s (errno %d)\n",
+                    fd, strerror(errno), errno);
+            return -1;
+        }
+        read_hdr += ret;
+    }
+
+    // Safely construct length
+    uint16_t len = (hdr[0] << 8) | hdr[1];
+
+    if (len > maxlen) {
+        fprintf(stderr, "[WARN] read_framed_packet: Length %u exceeds maxlen %d. Dropping packet.\n", len, maxlen);
+        return 0;
+    }
+    if (len < 1) {
+        fprintf(stderr, "[WARN] Received 0-byte packet, skipping write to tun_fd.\n");
+        return 0;
+    }
+
+    int received = 0;
+    while (received < len) {
+        int n = read(fd, buf + received, len - received);
+        if (n == 0) {
+            fprintf(stderr, "[DEBUG] read_framed_packet: EOF while reading packet body (fd=%d, received=%d/%d)\n",
+                    fd, received, len);
+            return -1;
+        } else if (n < 0) {
+            fprintf(stderr, "[DEBUG] read_framed_packet: Error reading packet body (fd=%d): %s (errno %d)\n",
+                    fd, strerror(errno), errno);
+            return -1;
+        }
+
+        received += n;
+    }
+
+    return len;
+}
+
+// int send_framed_packet(int fd, const char *buf, int len) {
+//     uint16_t hdr = htons(len);
+//     if (write(fd, &hdr, 2) != 2) return -1;
+//     if (write(fd, buf, len) != len) return -1;
+//     return 0;
+// }
+
+int send_framed_packet(int fd, const char *buf, int len) {
+    uint16_t hdr = htons(len);
+    
+    // Debug: Print header bytes
+    printf("[DEBUG] Sending packet: length = %d (0x%04x)\n", len, len);
+    printf("[DEBUG] Header bytes: %02x %02x\n", ((unsigned char*)&hdr)[0], ((unsigned char*)&hdr)[1]);
+
+    // Optional: Print first 16 bytes of payload
+    printf("[DEBUG] First 16 bytes of payload: ");
+    for (int i = 0; i < 16 && i < len; ++i) {
+        printf("%02x ", (unsigned char)buf[i]);
+    }
+    printf("\n");
+
+    if (write(fd, &hdr, 2) != 2) return -1;
+    if (write(fd, buf, len) != len) return -1;
+    return 0;
+}
+
 
 int main(int argc, char *argv[]) {
     if (argc != 6) {
@@ -101,14 +231,15 @@ int main(int argc, char *argv[]) {
     }
 
     char assigned_ip[32];
-    int sock_fd = tcp_connect(server_ip, server_port, assigned_ip, sizeof(assigned_ip));
+    char dns_ip[32];
+    int sock_fd = tcp_connect(server_ip, server_port, assigned_ip, sizeof(assigned_ip), dns_ip, sizeof(dns_ip));
 
     // Setup routing
     int tun_fd = tun_alloc(tun_name);
 
     char cmd[256];
 
-    // 1. Assign TUN IP address (OpenVPN style)
+    // 1. Assign TUN IP address
     snprintf(cmd, sizeof(cmd), "ip addr add %s/24 dev %s", assigned_ip, tun_name);
     system(cmd);
 
@@ -118,17 +249,36 @@ int main(int argc, char *argv[]) {
 
     // 3. Ensure proxy traffic (to server_ip) uses physical interface
     snprintf(cmd, sizeof(cmd), "ip route replace %s via %s dev %s", server_ip, gateway_ip, physical_if);
-    system(cmd); 
+    system(cmd);
 
     // 4. Replace default route to send all other traffic via TUN
     snprintf(cmd, sizeof(cmd), "ip route replace default dev %s", tun_name);
     system(cmd);
 
+    // 5. Set DNS server by updating resolv.conf
+    system("cp /etc/resolv.conf /etc/resolv.conf.backup");
+    FILE *resolv = fopen("/etc/resolv.conf", "w");
+    if (resolv) {
+        fprintf(resolv, "nameserver %s\n", dns_ip);
+        fclose(resolv);
+        printf("[*] DNS server set to %s\n", dns_ip);
+    } else {
+        perror("[-] Failed to write /etc/resolv.conf");
+    }
+    snprintf(cmd, sizeof(cmd), "ip route replace %s dev %s", dns_ip, tun_name);
+    system(cmd);
+
+    
 
     char buffer[BUF_SIZE];
     printf("[*] TUN device '%s' created and MPTCP (or TCP) connection established to %s:%d.\n", tun_name, server_ip, server_port);
 
+    g_dns_ip = dns_ip;
+    g_tun_name = tun_name;
+    setup_signal_handlers();
+
     while (1) {
+        memset(buffer, 0, BUF_SIZE);
         fd_set readfds;
         FD_ZERO(&readfds);
         FD_SET(tun_fd, &readfds);
@@ -137,49 +287,34 @@ int main(int argc, char *argv[]) {
 
         if (select(maxfd + 1, &readfds, NULL, NULL, NULL) < 0) {
             perror("select()");
+            cleanup(0);
             exit(1);
         }
 
-        // TUN → Proxy (Send packet with 2-byte length prefix)
+        // TUN → Proxy
         if (FD_ISSET(tun_fd, &readfds)) {
-            int nread = read(tun_fd, buffer + 2, BUF_SIZE - 2);
+            int nread = read(tun_fd, buffer, BUF_SIZE);
             if (nread > 0) {
-                uint16_t len = htons(nread);
-                memcpy(buffer, &len, 2);
-                if (write(sock_fd, buffer, nread + 2) < 0) {
-                    perror("write(sock_fd)");
+                if (send_framed_packet(sock_fd, buffer, nread) < 0) {
+                    perror("send_framed_packet()");
                 }
             }
         }
 
-        // Proxy → TUN (Receive full framed packets)
+        // Proxy → TUN
         if (FD_ISSET(sock_fd, &readfds)) {
-            // Step 1: Read 2-byte length prefix
-            uint16_t pkt_len;
-            int ret = read(sock_fd, &pkt_len, 2);
-            if (ret <= 0) {
-                printf("[*] Server closed connection (length)\n");
+            int n = read_framed_packet(sock_fd, buffer, BUF_SIZE);
+            if (n > 0) {
+                write(tun_fd, buffer, n);
+            } else {
+                printf("[*] Server closed connection or framing error\n");
                 break;
-            }
-
-            pkt_len = ntohs(pkt_len);
-            int received = 0;
-            while (received < pkt_len) { // here can be error? I am not sure lets check if we have an issue.
-                int n = read(sock_fd, buffer + received, pkt_len - received);
-                if (n <= 0) {
-                    printf("[*] Server closed connection (body)\n");
-                    break;
-                }
-                received += n;
-            }
-
-            if (write(tun_fd, buffer, pkt_len) < 0) {
-                perror("write(tun_fd)");
             }
         }
     }
 
     close(tun_fd);
     close(sock_fd);
+    cleanup(0);
     return 0;
 }
