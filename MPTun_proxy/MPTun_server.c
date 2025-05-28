@@ -90,17 +90,51 @@ int tun_alloc(char *dev) {
 }
 
 int read_framed_packet(int fd, char *buf, int maxlen) {
-    uint16_t len;
-    int ret = read(fd, &len, 2);
-    if (ret <= 0) return -1;
-    len = ntohs(len);
+    uint8_t hdr[2];
+    int ret = 0, read_hdr = 0;
+
+    // Read exactly 2 bytes for header
+    while (read_hdr < 2) {
+        ret = read(fd, hdr + read_hdr, 2 - read_hdr);
+        if (ret == 0) {
+            fprintf(stderr, "[DEBUG] read_framed_packet: EOF while reading length header (fd=%d)\n", fd);
+            return -1;
+        } else if (ret < 0) {
+            fprintf(stderr, "[DEBUG] read_framed_packet: Error reading length header (fd=%d): %s (errno %d)\n",
+                    fd, strerror(errno), errno);
+            return -1;
+        }
+        read_hdr += ret;
+    }
+
+    // Safely construct length
+    uint16_t len = (hdr[0] << 8) | hdr[1];
+
+    if (len > maxlen) {
+        fprintf(stderr, "[WARN] read_framed_packet: Length %u exceeds maxlen %d. Dropping packet.\n", len, maxlen);
+        return 0;
+    }
+    if (len < 1) {
+        fprintf(stderr, "[WARN] Received 0-byte packet, skipping write to tun_fd.\n");
+        return 0;
+    }
 
     int received = 0;
     while (received < len) {
         int n = read(fd, buf + received, len - received);
-        if (n <= 0) return -1;
+        if (n == 0) {
+            fprintf(stderr, "[DEBUG] read_framed_packet: EOF while reading packet body (fd=%d, received=%d/%d)\n",
+                    fd, received, len);
+            return -1;
+        } else if (n < 0) {
+            fprintf(stderr, "[DEBUG] read_framed_packet: Error reading packet body (fd=%d): %s (errno %d)\n",
+                    fd, strerror(errno), errno);
+            return -1;
+        }
+
         received += n;
     }
+
     return len;
 }
 
@@ -115,6 +149,7 @@ void handle_client(int client_fd, int tun_fd, char *client_ip) {
     char buffer[BUF_SIZE];
 
     while (1) {
+        memset(buffer, 0, BUF_SIZE);
         fd_set readfds;
         FD_ZERO(&readfds);
         FD_SET(client_fd, &readfds);
@@ -128,12 +163,24 @@ void handle_client(int client_fd, int tun_fd, char *client_ip) {
 
         if (FD_ISSET(client_fd, &readfds)) {
             int n = read_framed_packet(client_fd, buffer, BUF_SIZE);
-            if (n <= 0) {
-                printf("[*] Client disconnected.\n");
+            if (n < 0) {
+                printf("[*] Client disconnected or error in framing.\n");
                 break;
             }
+            if (n == 0) {
+                // WARNING CASE    
+                continue;
+            }
+
             if (write(tun_fd, buffer, n) < 0) {
+                fprintf(stderr, "[ERROR] write(tun_fd) failed: Tried writing %d bytes to tun_fd=%d\n", n, tun_fd);
                 perror("write(tun_fd)");
+
+                fprintf(stderr, "[DEBUG] First 16 bytes of buffer: ");
+                for (int i = 0; i < 16 && i < n; ++i) {
+                    fprintf(stderr, "%02x ", (unsigned char)buffer[i]);
+                }
+                fprintf(stderr, "\n");
             }
         }
 
@@ -151,17 +198,20 @@ void handle_client(int client_fd, int tun_fd, char *client_ip) {
     exit(0);
 }
 int main(int argc, char *argv[]) {
-    if (argc != 4) {
-        fprintf(stderr, "Usage: %s <bind_ip> <port> <physical_interface>\n", argv[0]);
+    if (argc != 5) {
+        fprintf(stderr, "Usage: %s <bind_ip> <port> <physical_interface> <dns_ip>\n", argv[0]);
         exit(1);
     }
 
     const char *bind_ip = argv[1];
     int port = atoi(argv[2]);
     const char *physical_if = argv[3];
+    const char *dns_ip = argv[4];
 
     char tun_name[IFNAMSIZ] = "mptcp_tun";
     int tun_fd = tun_alloc(tun_name);
+
+
 
     char cmd[256];
 
@@ -240,7 +290,19 @@ int main(int argc, char *argv[]) {
         } else if (pid == 0) {
             // Child
             close(listen_fd);
-            write(client_fd, assigned_ip, strlen(assigned_ip));
+
+            char msg[64];
+            snprintf(msg, sizeof(msg), "%s\n%s\n", assigned_ip, dns_ip);  // Client IP + DNS
+
+            if (write(client_fd, msg, strlen(msg)) < 0) {
+                perror("write(client_fd)");
+                release_ip(assigned_ip);
+                close(client_fd);
+                exit(1);
+            }
+
+            printf("[*] Inner IP (%s) and DNS (%s) sent to client (%s)\n", assigned_ip, dns_ip, inet_ntoa(cli_addr.sin_addr));
+
             handle_client(client_fd, tun_fd, assigned_ip);
         } else {
             // Parent
