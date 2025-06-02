@@ -15,9 +15,43 @@
 #include <arpa/inet.h>
 #include <signal.h>
 
-#define BUF_SIZE 4096
+// === Logging Levels ===
+#define LOG_ERROR 0
+#define LOG_WARN  1
+#define LOG_INFO  2
+#define LOG_DEBUG 3
+#define LOG_TRACE 4
+
+// === Default log level (can override via env or CLI) ===
+int LOG_LEVEL = LOG_INFO;
+
+// === Optional color output for log levels ===
+#define COLOR_RESET "\033[0m"
+#define COLOR_RED   "\033[0;31m"
+#define COLOR_YELLOW "\033[0;33m"
+#define COLOR_GREEN "\033[0;32m"
+#define COLOR_CYAN  "\033[0;36m"
+#define COLOR_GRAY  "\033[1;30m"
+
+// === Logging macro ===
+#define LOG(level, fmt, ...) \
+    do { \
+        if ((level) <= LOG_LEVEL) { \
+            const char *color = ""; \
+            const char *level_str = ""; \
+            if (level == LOG_ERROR) { color = COLOR_RED; level_str = "ERROR"; } \
+            else if (level == LOG_WARN) { color = COLOR_YELLOW; level_str = "WARN"; } \
+            else if (level == LOG_INFO) { color = COLOR_GREEN; level_str = "INFO"; } \
+            else if (level == LOG_DEBUG) { color = COLOR_CYAN; level_str = "DEBUG"; } \
+            else if (level == LOG_TRACE) { color = COLOR_GRAY; level_str = "TRACE"; } \
+            fprintf(stderr, "%s[%s] " fmt COLOR_RESET "\n", color, level_str, ##__VA_ARGS__); \
+        } \
+    } while (0)
+
+#define BUF_SIZE 8192
 const char *g_dns_ip = NULL;
 const char *g_tun_name = NULL;
+#define pkt_MSS 512
 
 void cleanup(int signo) {
     char cmd[256];
@@ -46,7 +80,6 @@ void cleanup(int signo) {
     exit(0);
 }
 
-
 void setup_signal_handlers() {
     signal(SIGINT, cleanup);
     signal(SIGTERM, cleanup);
@@ -74,7 +107,7 @@ int tun_alloc(char *dev) {
     }
 
     // SUCCESS
-    printf("[*] TUN interface actually created: %s\n", ifr.ifr_name);
+    LOG(LOG_INFO,  "TUN interface actually created: %s", ifr.ifr_name);
     strcpy(dev, ifr.ifr_name);
     return fd;
 }
@@ -87,7 +120,7 @@ int tcp_connect(const char *server_ip, int port,
     struct sockaddr_in server;
 
     if ((sock = socket(AF_INET, SOCK_STREAM, IPPROTO_MPTCP)) < 0) {
-        perror("Creating socket");
+        LOG(LOG_ERROR, "Fail to create socket");
         exit(1);
     }
 
@@ -96,7 +129,7 @@ int tcp_connect(const char *server_ip, int port,
     inet_pton(AF_INET, server_ip, &server.sin_addr);
 
     if (connect(sock, (struct sockaddr *)&server, sizeof(server)) < 0) {
-        perror("Connect failed");
+        LOG(LOG_ERROR, "Connect failed");
         close(sock);
         exit(1);
     }
@@ -105,7 +138,7 @@ int tcp_connect(const char *server_ip, int port,
     char buffer[128];
     ssize_t n = read(sock, buffer, sizeof(buffer) - 1);
     if (n <= 0) {
-        perror("Failed to read IP/DNS info");
+        LOG(LOG_ERROR, "Failed to read IP/DNS info");
         close(sock);
         exit(1);
     }
@@ -116,7 +149,7 @@ int tcp_connect(const char *server_ip, int port,
     char *line2 = strtok(NULL, "\n");
 
     if (!line1 || !line2) {
-        fprintf(stderr, "[-] Invalid setup message format received from server\n");
+        LOG(LOG_WARN, "Invalid setup message format received from server\n");
         close(sock);
         exit(1);
     }
@@ -127,8 +160,8 @@ int tcp_connect(const char *server_ip, int port,
     strncpy(dns_ip, line2, dns_ip_len - 1);
     dns_ip[dns_ip_len - 1] = '\0';
 
-    printf("[*] Assigned IP: %s\n", assigned_ip);
-    printf("[*] DNS Server:  %s\n", dns_ip);
+    LOG(LOG_INFO,  "Assigned Inner IP: %s", assigned_ip);
+    LOG(LOG_INFO,  "Notified DNS Server:  %s", dns_ip);
 
     return sock;
 }
@@ -141,10 +174,10 @@ int read_framed_packet(int fd, char *buf, int maxlen) {
     while (read_hdr < 2) {
         ret = read(fd, hdr + read_hdr, 2 - read_hdr);
         if (ret == 0) {
-            fprintf(stderr, "[DEBUG] read_framed_packet: EOF while reading length header (fd=%d)\n", fd);
+            LOG(LOG_DEBUG, "read_framed_packet: EOF while reading length header (fd=%d)", fd);
             return -1;
         } else if (ret < 0) {
-            fprintf(stderr, "[DEBUG] read_framed_packet: Error reading length header (fd=%d): %s (errno %d)\n",
+            LOG(LOG_DEBUG, "read_framed_packet: Error reading length header (fd=%d): %s (errno %d)",
                     fd, strerror(errno), errno);
             return -1;
         }
@@ -155,11 +188,11 @@ int read_framed_packet(int fd, char *buf, int maxlen) {
     uint16_t len = (hdr[0] << 8) | hdr[1];
 
     if (len > maxlen) {
-        fprintf(stderr, "[WARN] read_framed_packet: Length %u exceeds maxlen %d. Dropping packet.\n", len, maxlen);
+        LOG(LOG_WARN, "read_framed_packet: Length %u exceeds maxlen %d. Dropping packet.", len, maxlen);
         return 0;
     }
     if (len < 1) {
-        fprintf(stderr, "[WARN] Received 0-byte packet, skipping write to tun_fd.\n");
+        LOG(LOG_WARN, "Received 0-byte packet, skipping write to tun_fd.");
         return 0;
     }
 
@@ -167,11 +200,11 @@ int read_framed_packet(int fd, char *buf, int maxlen) {
     while (received < len) {
         int n = read(fd, buf + received, len - received);
         if (n == 0) {
-            fprintf(stderr, "[DEBUG] read_framed_packet: EOF while reading packet body (fd=%d, received=%d/%d)\n",
+            LOG(LOG_DEBUG, "read_framed_packet: EOF while reading packet body (fd=%d, received=%d/%d)",
                     fd, received, len);
             return -1;
         } else if (n < 0) {
-            fprintf(stderr, "[DEBUG] read_framed_packet: Error reading packet body (fd=%d): %s (errno %d)\n",
+            LOG(LOG_DEBUG, "read_framed_packet: Error reading packet body (fd=%d): %s (errno %d)",
                     fd, strerror(errno), errno);
             return -1;
         }
@@ -182,37 +215,19 @@ int read_framed_packet(int fd, char *buf, int maxlen) {
     return len;
 }
 
-// int send_framed_packet(int fd, const char *buf, int len) {
-//     uint16_t hdr = htons(len);
-//     if (write(fd, &hdr, 2) != 2) return -1;
-//     if (write(fd, buf, len) != len) return -1;
-//     return 0;
-// }
-
-int send_framed_packet(int fd, const char *buf, int len) {
-    uint16_t hdr = htons(len);
-    
-    // Debug: Print header bytes
-    printf("[DEBUG] Sending packet: length = %d (0x%04x)\n", len, len);
-    printf("[DEBUG] Header bytes: %02x %02x\n", ((unsigned char*)&hdr)[0], ((unsigned char*)&hdr)[1]);
-
-    // Optional: Print first 16 bytes of payload
-    printf("[DEBUG] First 16 bytes of payload: ");
-    for (int i = 0; i < 16 && i < len; ++i) {
-        printf("%02x ", (unsigned char)buf[i]);
-    }
-    printf("\n");
-
-    if (write(fd, &hdr, 2) != 2) return -1;
-    if (write(fd, buf, len) != len) return -1;
-    return 0;
-}
-
-
 int main(int argc, char *argv[]) {
     if (argc != 6) {
         fprintf(stderr, "Usage: %s <server_ip> <server_port> <tun_name> <gateway_ip> <physical_iface>\n", argv[0]);
         exit(1);
+    }
+
+    // Set LOG_LEVEL from environment variable "LOGLEVEL", if provided
+    char *lvl_env = getenv("LOGLEVEL");
+    if (lvl_env) {
+        int lvl = atoi(lvl_env);
+        if (lvl >= LOG_ERROR && lvl <= LOG_TRACE) {
+            LOG_LEVEL = lvl;
+        }
     }
 
     const char *server_ip = argv[1];
@@ -261,17 +276,15 @@ int main(int argc, char *argv[]) {
     if (resolv) {
         fprintf(resolv, "nameserver %s\n", dns_ip);
         fclose(resolv);
-        printf("[*] DNS server set to %s\n", dns_ip);
+        LOG(LOG_INFO,  "DNS server set to %s", dns_ip);
     } else {
-        perror("[-] Failed to write /etc/resolv.conf");
+        LOG(LOG_WARN,  "Failed to write /etc/resolv.conf");
     }
     snprintf(cmd, sizeof(cmd), "ip route replace %s dev %s", dns_ip, tun_name);
     system(cmd);
 
-    
-
     char buffer[BUF_SIZE];
-    printf("[*] TUN device '%s' created and MPTCP (or TCP) connection established to %s:%d.\n", tun_name, server_ip, server_port);
+    LOG(LOG_INFO,  "TUN device '%s' created and MPTCP (or TCP) connection established to %s:%d.", tun_name, server_ip, server_port);
 
     g_dns_ip = dns_ip;
     g_tun_name = tun_name;
@@ -295,24 +308,43 @@ int main(int argc, char *argv[]) {
         if (FD_ISSET(tun_fd, &readfds)) {
             int nread = read(tun_fd, buffer, BUF_SIZE);
             if (nread > 0) {
-                if (send_framed_packet(sock_fd, buffer, nread) < 0) {
-                    perror("send_framed_packet()");
+                uint16_t hdr = htons(nread);
+                if (write(sock_fd, &hdr, 2) != 2){
+                    perror("TUN->Proxy header write()");
+                }
+                if (write(sock_fd, buffer, nread) != nread){
+                    perror("TUN->Proxy payload write()");
                 }
             }
         }
-
         // Proxy → TUN
         if (FD_ISSET(sock_fd, &readfds)) {
+            LOG(LOG_TRACE, "sock_fd is readable");
+
             int n = read_framed_packet(sock_fd, buffer, BUF_SIZE);
+            LOG(LOG_TRACE, "read_framed_packet(sock_fd) returned %d", n);
+
             if (n > 0) {
-                write(tun_fd, buffer, n);
-            } else {
-                printf("[*] Server closed connection or framing error\n");
-                break;
+                int w = write(tun_fd, buffer, n);
+                if (w < 0) {
+                    LOG(LOG_ERROR, "write(tun_fd) failed: Tried writing %d bytes to tun_fd=%d", n, tun_fd);
+                    perror("write(tun_fd)");
+                    LOG(LOG_DEBUG, "First 16 bytes of buffer: ");
+                    for (int i = 0; i < 16 && i < n; ++i) {
+                        fprintf(stderr, "%02x ", (unsigned char)buffer[i]);
+                    }
+                    fprintf(stderr, "\n");
+                } else {
+                    LOG(LOG_DEBUG, " wrote %d bytes to tun_fd", w);
+                }
+            } else if (n == 0) {
+                LOG(LOG_TRACE, "No complete framed packet available (n == 0)");
+            } else { // n < 0
+                LOG(LOG_WARN,  "Server closed connection or framing error");
+                // Handle disconnect as needed (e.g., close sock_fd or set a done flag)
             }
         }
     }
-
     close(tun_fd);
     close(sock_fd);
     cleanup(0);
