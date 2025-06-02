@@ -14,18 +14,58 @@
 #include <linux/if_tun.h>
 #include <sys/ioctl.h>
 #include <net/if.h>
+#include <netinet/tcp.h>
+#include <sys/time.h>
 
-#define BUF_SIZE 4096
+// === Logging Levels ===
+#define LOG_ERROR 0
+#define LOG_WARN  1
+#define LOG_INFO  2
+#define LOG_DEBUG 3
+#define LOG_TRACE 4
+
+// === Default log level (can override via env or CLI) ===
+int LOG_LEVEL = LOG_INFO;
+
+// === Optional color output for log levels ===
+#define COLOR_RESET "\033[0m"
+#define COLOR_RED   "\033[0;31m"
+#define COLOR_YELLOW "\033[0;33m"
+#define COLOR_GREEN "\033[0;32m"
+#define COLOR_CYAN  "\033[0;36m"
+#define COLOR_GRAY  "\033[1;30m"
+
+// === Logging macro ===
+#define LOG(level, fmt, ...) \
+    do { \
+        if ((level) <= LOG_LEVEL) { \
+            const char *color = ""; \
+            const char *level_str = ""; \
+            if (level == LOG_ERROR) { color = COLOR_RED; level_str = "ERROR"; } \
+            else if (level == LOG_WARN) { color = COLOR_YELLOW; level_str = "WARN"; } \
+            else if (level == LOG_INFO) { color = COLOR_GREEN; level_str = "INFO"; } \
+            else if (level == LOG_DEBUG) { color = COLOR_CYAN; level_str = "DEBUG"; } \
+            else if (level == LOG_TRACE) { color = COLOR_GRAY; level_str = "TRACE"; } \
+            fprintf(stderr, "%s[%s] " fmt COLOR_RESET "\n", color, level_str, ##__VA_ARGS__); \
+        } \
+    } while (0)
+
+#define BUF_SIZE 8192
 #define MAX_CLIENTS 256
+#define MERGE_TARGET_SIZE 3200   // Tune as needed (should fit your tunnel's MTU)
+#define MERGE_TIMEOUT_MS  5     // Send even if not full after 5ms
+
+// Add these buffers/statics at the top of your function or as persistent variables
+char merge_buf[MERGE_TARGET_SIZE*2];
+int merge_len = 0;
+struct timeval merge_last_time;
 
 typedef struct {
     pid_t pid;
     char ip[32];
 } client_info_t;
-
 client_info_t client_table[MAX_CLIENTS];
 int client_count = 0;
-
 int ip_pool[253] = {0}; // 10.0.1.2 ~ 10.0.1.254
 
 int allocate_ip(char *out_ip) {
@@ -44,9 +84,8 @@ void release_ip(const char *ip) {
     int last_octet;
     if (sscanf(ip, "10.0.1.%d", &last_octet) == 1 && last_octet >= 2 && last_octet <= 254) {
         ip_pool[last_octet - 2] = 0;
-        //printf("[*] Released inner IP %s (slot %d)\n", ip, last_octet - 2);
     } else {
-        fprintf(stderr, "[-] Invalid IP to release: %s\n", ip);
+        LOG(LOG_WARN, "Invalid IP to release: %s", ip);
     }
 }
 
@@ -55,11 +94,10 @@ void sigchld_handler(int signo) {
         int status;
         pid_t pid = waitpid(-1, &status, WNOHANG);
         if (pid <= 0) break;
-
         for (int i = 0; i < client_count; ++i) {
             if (client_table[i].pid == pid) {
                 release_ip(client_table[i].ip);
-                printf("[*] Released inner IP %s (PID %d)\n", client_table[i].ip, pid);
+                LOG(LOG_INFO, "Released inner IP %s (PID %d)", client_table[i].ip, pid);
                 client_table[i] = client_table[--client_count];
                 break;
             }
@@ -74,7 +112,6 @@ int tun_alloc(char *dev) {
         perror("open /dev/net/tun");
         exit(1);
     }
-
     memset(&ifr, 0, sizeof(ifr));
     ifr.ifr_flags = IFF_TUN | IFF_NO_PI;
     strncpy(ifr.ifr_name, dev, IFNAMSIZ - 1);
@@ -84,65 +121,52 @@ int tun_alloc(char *dev) {
         close(fd);
         exit(1);
     }
-
-    printf("[*] TUN interface created: %s\n", ifr.ifr_name);
+    LOG(LOG_INFO, "[*] TUN interface created: %s", ifr.ifr_name);
     return fd;
 }
 
 int read_framed_packet(int fd, char *buf, int maxlen) {
     uint8_t hdr[2];
     int ret = 0, read_hdr = 0;
-
     // Read exactly 2 bytes for header
     while (read_hdr < 2) {
         ret = read(fd, hdr + read_hdr, 2 - read_hdr);
         if (ret == 0) {
-            fprintf(stderr, "[DEBUG] read_framed_packet: EOF while reading length header (fd=%d)\n", fd);
+            LOG(LOG_DEBUG, "read_framed_packet: EOF while reading length header (fd=%d)", fd);
             return -1;
         } else if (ret < 0) {
-            fprintf(stderr, "[DEBUG] read_framed_packet: Error reading length header (fd=%d): %s (errno %d)\n",
+            LOG(LOG_DEBUG, "read_framed_packet: Error reading length header (fd=%d): %s (errno %d)",
                     fd, strerror(errno), errno);
             return -1;
         }
         read_hdr += ret;
     }
-
     // Safely construct length
     uint16_t len = (hdr[0] << 8) | hdr[1];
 
     if (len > maxlen) {
-        fprintf(stderr, "[WARN] read_framed_packet: Length %u exceeds maxlen %d. Dropping packet.\n", len, maxlen);
+        LOG(LOG_WARN, "read_framed_packet: Length %u exceeds maxlen %d. Dropping packet.", len, maxlen);
         return 0;
     }
     if (len < 1) {
-        fprintf(stderr, "[WARN] Received 0-byte packet, skipping write to tun_fd.\n");
+        LOG(LOG_WARN, "Received 0-byte packet, skipping write to tun_fd.");
         return 0;
     }
-
     int received = 0;
     while (received < len) {
         int n = read(fd, buf + received, len - received);
         if (n == 0) {
-            fprintf(stderr, "[DEBUG] read_framed_packet: EOF while reading packet body (fd=%d, received=%d/%d)\n",
+            LOG(LOG_DEBUG, "read_framed_packet: EOF while reading packet body (fd=%d, received=%d/%d)",
                     fd, received, len);
             return -1;
         } else if (n < 0) {
-            fprintf(stderr, "[DEBUG] read_framed_packet: Error reading packet body (fd=%d): %s (errno %d)\n",
+            LOG(LOG_DEBUG, "read_framed_packet: Error reading packet body (fd=%d): %s (errno %d)",
                     fd, strerror(errno), errno);
             return -1;
         }
-
         received += n;
     }
-
     return len;
-}
-
-int send_framed_packet(int fd, const char *buf, int len) {
-    uint16_t hdr = htons(len);
-    if (write(fd, &hdr, 2) != 2) return -1;
-    if (write(fd, buf, len) != len) return -1;
-    return 0;
 }
 
 void handle_client(int client_fd, int tun_fd, char *client_ip) {
@@ -156,43 +180,154 @@ void handle_client(int client_fd, int tun_fd, char *client_ip) {
         FD_SET(tun_fd, &readfds);
         int maxfd = (client_fd > tun_fd) ? client_fd : tun_fd;
 
-        if (select(maxfd + 1, &readfds, NULL, NULL, NULL) < 0) {
+        // Set up timeout for select, to check merge buffer flush
+        struct timeval timeout;
+        timeout.tv_sec = 0;
+        timeout.tv_usec = MERGE_TIMEOUT_MS * 1000;
+
+        int ret = select(maxfd + 1, &readfds, NULL, NULL, &timeout);
+        if (ret < 0) {
             perror("select()");
             break;
         }
 
-        if (FD_ISSET(client_fd, &readfds)) {
-            int n = read_framed_packet(client_fd, buffer, BUF_SIZE);
-            if (n < 0) {
-                printf("[*] Client disconnected or error in framing.\n");
-                break;
-            }
-            if (n == 0) {
-                // WARNING CASE    
-                continue;
-            }
+        // === Handle timeout-based flush if no FD was ready ===
+        if (ret == 0 && merge_len > 0) {
+            struct timeval now;
+            gettimeofday(&now, NULL);
+            long elapsed_ms = (now.tv_sec - merge_last_time.tv_sec) * 1000 +
+                            (now.tv_usec - merge_last_time.tv_usec) / 1000;
 
-            if (write(tun_fd, buffer, n) < 0) {
-                fprintf(stderr, "[ERROR] write(tun_fd) failed: Tried writing %d bytes to tun_fd=%d\n", n, tun_fd);
-                perror("write(tun_fd)");
+            LOG(LOG_TRACE, "select() timeout — checking flush: elapsed=%ld ms", elapsed_ms);
 
-                fprintf(stderr, "[DEBUG] First 16 bytes of buffer: ");
-                for (int i = 0; i < 16 && i < n; ++i) {
-                    fprintf(stderr, "%02x ", (unsigned char)buffer[i]);
+            if (elapsed_ms >= MERGE_TIMEOUT_MS) {
+                LOG(LOG_DEBUG, "Timeout (%ld ms >= %d ms): flushing merge buffer (via select timeout)",
+                    elapsed_ms, MERGE_TIMEOUT_MS);
+
+                if (write(client_fd, merge_buf, merge_len) < 0) {
+                    LOG(LOG_ERROR, "TUN -> Client write() on select timeout");
+                } else {
+                    LOG(LOG_DEBUG,"Flushed %d bytes to client (via select timeout)", merge_len);
                 }
-                fprintf(stderr, "\n");
+
+                merge_len = 0;
+                gettimeofday(&merge_last_time, NULL);
+                LOG(LOG_TRACE,"merge_last_time updated after select-timeout flush");
             }
         }
 
+        // === TUN -> CLIENT (MERGE & SEND) ===
         if (FD_ISSET(tun_fd, &readfds)) {
+            LOG(LOG_DEBUG,"tun_fd is readable");
+
             int n = read(tun_fd, buffer, BUF_SIZE);
+            LOG(LOG_DEBUG,"read() returned %d", n);
+
             if (n > 0) {
-                if (send_framed_packet(client_fd, buffer, n) < 0) {
-                    perror("send_framed_packet()");
+                LOG(LOG_DEBUG,"Read %d bytes from TUN", n);
+
+                // Sanity check on merge buffer size
+                if (merge_len + n + 2 > MERGE_TARGET_SIZE * 2) {
+                    LOG(LOG_DEBUG,"merge_buf overflow: current=%d, incoming=%d -> flushing early", merge_len, n);
+                    LOG(LOG_DEBUG,"About to write early flush (%d bytes)", merge_len);
+
+                    if (write(client_fd, merge_buf, merge_len) < 0) {
+                        LOG(LOG_ERROR, "TUN -> Client early flush write()");
+                    } else {
+                        LOG(LOG_DEBUG,"Flushed %d bytes due to buffer overflow risk", merge_len);
+                    }
+
+                    merge_len = 0;
+                    gettimeofday(&merge_last_time, NULL);
+                    LOG(LOG_DEBUG,"merge_last_time updated after early flush");
+                }
+
+                // Prepend packet length (network order)
+                LOG(LOG_DEBUG,"Prepending length header and copying packet...");
+                merge_buf[merge_len] = (n >> 8) & 0xFF;
+                merge_buf[merge_len + 1] = n & 0xFF;
+                memcpy(merge_buf + merge_len + 2, buffer, n);
+                merge_len += n + 2;
+
+                if (merge_len == n + 2) {
+                    gettimeofday(&merge_last_time, NULL);
+                    LOG(LOG_DEBUG,"merge_last_time initialized after first packet");
+                }
+                LOG(LOG_DEBUG,"Appended packet of %d bytes (merge_len now %d)", n, merge_len);
+            } else if (n < 0) {
+                LOG(LOG_ERROR, "TUN read()");
+            } else {
+                LOG(LOG_DEBUG,"TUN read() returned 0 (EOF?)");
+            }
+
+            // === Immediate flush if merge buffer full ===
+            LOG(LOG_DEBUG,"Checking if merge_len >= MERGE_TARGET_SIZE (%d >= %d)...", merge_len, MERGE_TARGET_SIZE);
+            if (merge_len >= MERGE_TARGET_SIZE) {
+                LOG(LOG_DEBUG,"merge_len %d >= MERGE_TARGET_SIZE %d: flushing", merge_len, MERGE_TARGET_SIZE);
+                if (write(client_fd, merge_buf, merge_len) < 0) {
+                    LOG(LOG_ERROR, "TUN -> Client write()");
+                } else {
+                    LOG(LOG_DEBUG,"Flushed %d bytes to client (merge full)", merge_len);
+                }
+                merge_len = 0;
+                gettimeofday(&merge_last_time, NULL);
+                LOG(LOG_DEBUG,"merge_last_time updated after full-buffer flush");
+            }
+
+            // === Timeout-based flush ===
+            else if (merge_len > 0) {
+                LOG(LOG_DEBUG,"Checking timeout-based flush...");
+                struct timeval now;
+                gettimeofday(&now, NULL);
+
+                long elapsed_ms = (now.tv_sec - merge_last_time.tv_sec) * 1000 +
+                                (now.tv_usec - merge_last_time.tv_usec) / 1000;
+
+                LOG(LOG_DEBUG,"Elapsed time since last flush: %ld ms", elapsed_ms);
+
+                if (elapsed_ms >= MERGE_TIMEOUT_MS) {
+                    LOG(LOG_DEBUG,"Timeout (%ld ms >= %d ms): flushing merge buffer", elapsed_ms, MERGE_TIMEOUT_MS);
+                    if (write(client_fd, merge_buf, merge_len) < 0) {
+                        LOG(LOG_ERROR, "TUN -> Client write()");
+                    } else {
+                        LOG(LOG_DEBUG,"Flushed %d bytes to client (timeout)", merge_len);
+                    }
+                    merge_len = 0;
+                    gettimeofday(&merge_last_time, NULL);
+                    LOG(LOG_DEBUG,"merge_last_time updated after timeout-based flush");
+                }
+            } else {
+                LOG(LOG_DEBUG,"merge_len is 0, skipping timeout flush check");
+            }
+        }
+
+        // === CLIENT -> TUN (no merge needed) ===
+        if (FD_ISSET(client_fd, &readfds)) {
+            LOG(LOG_TRACE, "client_fd is readable");
+
+            int n = read_framed_packet(client_fd, buffer, BUF_SIZE);
+            LOG(LOG_TRACE, "read_framed_packet returned %d", n);
+
+            if (n < 0) {
+                LOG(LOG_INFO, "Client disconnected or error in framing.");
+                break; // Or mark connection as closed
+            } else if (n == 0) {
+                LOG(LOG_TRACE, "No complete framed packet available (n == 0)");
+            } else {
+                LOG(LOG_TRACE, "Writing %d bytes to tun_fd=%d", n, tun_fd);
+                int w = write(tun_fd, buffer, n);
+                if (w < 0) {
+                    LOG(LOG_ERROR, "write(tun_fd) failed: Tried writing %d bytes to tun_fd=%d", n, tun_fd);
+                    perror("write(tun_fd)");
+                    LOG(LOG_DEBUG,"First 16 bytes of buffer: ");
+                    // for (int i = 0; i < 16 && i < n; ++i)
+                    //     LOG(LOG_TRACE, stderr, "%02x ", (unsigned char)buffer[i]); 
+                } else {
+                    LOG(LOG_DEBUG,"Successfully wrote %d bytes to tun_fd", w);
                 }
             }
         }
-    }
+    }   
     close(client_fd);
     close(tun_fd);
     exit(0);
@@ -203,6 +338,15 @@ int main(int argc, char *argv[]) {
         exit(1);
     }
 
+    // Set LOG_LEVEL from environment variable "LOGLEVEL", if provided
+    char *lvl_env = getenv("LOGLEVEL");
+    if (lvl_env) {
+        int lvl = atoi(lvl_env);
+        if (lvl >= LOG_ERROR && lvl <= LOG_TRACE) {
+            LOG_LEVEL = lvl;
+        }
+    } // HOW TO USE? -> LOGLEVEL=4 ./client   
+
     const char *bind_ip = argv[1];
     int port = atoi(argv[2]);
     const char *physical_if = argv[3];
@@ -211,10 +355,7 @@ int main(int argc, char *argv[]) {
     char tun_name[IFNAMSIZ] = "mptcp_tun";
     int tun_fd = tun_alloc(tun_name);
 
-
-
     char cmd[256];
-
     // Bring up TUN interface
     snprintf(cmd, sizeof(cmd), "ip link set %s up", tun_name);
     system(cmd);
@@ -232,7 +373,6 @@ int main(int argc, char *argv[]) {
              "iptables -t nat -A POSTROUTING -o %s -j MASQUERADE",
              physical_if, physical_if);
     system(cmd);
-
 
     int listen_fd;
     struct sockaddr_in serv_addr, cli_addr;
@@ -264,24 +404,36 @@ int main(int argc, char *argv[]) {
         exit(1);
     }
 
-    printf("[*] MPTCP tunnel server listening on %s:%d...\n", bind_ip, port);
+    LOG(LOG_INFO,  "MPTCP tunnel server listening on %s:%d...", bind_ip, port);
 
     while (1) {
         int client_fd = accept(listen_fd, (struct sockaddr*)&cli_addr, &cli_len);
         if (client_fd < 0) {
-            perror("accept()");
+            LOG(LOG_ERROR, "accept()");
             continue;
         }
 
-        printf("[*] New client from %s\n", inet_ntoa(cli_addr.sin_addr));
+        // I tried MPTCP socket setting for traffic shaping. It didn't work for my purpose.
+        // I keep these lines since I may need them for other reasons in the future.
+        // int flag = 1;
+        // if (setsockopt(client_fd, IPPROTO_TCP, TCP_NODELAY, &flag, sizeof(flag)) < 0) {
+        //     perror("setsockopt(TCP_NODELAY)");
+        // }
+        // Avoid sending more than 1024 bytes at a time
+        // int lowat = 2024;
+        // setsockopt(client_fd, IPPROTO_TCP, TCP_NOTSENT_LOWAT, &lowat, sizeof(lowat));
 
+        // // Keep total send buffer small (but not too small)
+        // int sndbuf = 8192;
+        // setsockopt(client_fd, SOL_SOCKET, SO_SNDBUF, &sndbuf, sizeof(sndbuf));
+
+        LOG(LOG_INFO,  "New client from %s", inet_ntoa(cli_addr.sin_addr));
         char assigned_ip[32];
         if (allocate_ip(assigned_ip) < 0) {
             fprintf(stderr, "[-] No available IP addresses\n");
             close(client_fd);
             continue;
         }
-
         pid_t pid = fork();
         if (pid < 0) {
             perror("fork()");
@@ -290,25 +442,20 @@ int main(int argc, char *argv[]) {
         } else if (pid == 0) {
             // Child
             close(listen_fd);
-
             char msg[64];
             snprintf(msg, sizeof(msg), "%s\n%s\n", assigned_ip, dns_ip);  // Client IP + DNS
-
             if (write(client_fd, msg, strlen(msg)) < 0) {
                 perror("write(client_fd)");
                 release_ip(assigned_ip);
                 close(client_fd);
                 exit(1);
             }
-
-            printf("[*] Inner IP (%s) and DNS (%s) sent to client (%s)\n", assigned_ip, dns_ip, inet_ntoa(cli_addr.sin_addr));
-
+            LOG(LOG_INFO,  "Inner IP (%s) and DNS (%s) sent to client (%s)", assigned_ip, dns_ip, inet_ntoa(cli_addr.sin_addr));
             handle_client(client_fd, tun_fd, assigned_ip);
         } else {
             // Parent
-            printf("[*] Inner IP (%s) assigned to client (%s), handled by child PID %d\n",
+            LOG(LOG_INFO,  "Inner IP (%s) assigned to client (%s), handled by child PID %d",
                 assigned_ip, inet_ntoa(cli_addr.sin_addr), pid);
-
             if (client_count < MAX_CLIENTS) {
                 client_table[client_count].pid = pid;
                 strncpy(client_table[client_count].ip, assigned_ip, sizeof(client_table[client_count].ip));
@@ -317,6 +464,5 @@ int main(int argc, char *argv[]) {
             close(client_fd);
         }
     }
-
     return 0;
 }
