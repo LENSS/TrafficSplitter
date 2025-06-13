@@ -16,6 +16,8 @@
 #include <net/if.h>
 #include <netinet/tcp.h>
 #include <sys/time.h>
+#include <poll.h>
+#include <time.h>
 
 // === Logging Levels ===
 #define LOG_ERROR 0
@@ -50,15 +52,13 @@ int LOG_LEVEL = LOG_INFO;
         } \
     } while (0)
 
-#define BUF_SIZE 8192
-#define MAX_CLIENTS 256
-#define MERGE_TARGET_SIZE 3200   // Tune as needed (should fit your tunnel's MTU)
-#define MERGE_TIMEOUT_MS  5     // Send even if not full after 5ms
+#define BUF_SIZE 16384
+#define MAX_CLIENTS 128
+#define MERGE_TARGET_SIZE 3000
+#define MERGE_TIME_WINDOW_US  10000 
 
-// Add these buffers/statics at the top of your function or as persistent variables
-char merge_buf[MERGE_TARGET_SIZE*2];
+char merge_buf[MERGE_TARGET_SIZE*3];
 int merge_len = 0;
-struct timeval merge_last_time;
 
 typedef struct {
     pid_t pid;
@@ -171,138 +171,81 @@ int read_framed_packet(int fd, char *buf, int maxlen) {
 
 void handle_client(int client_fd, int tun_fd, char *client_ip) {
     char buffer[BUF_SIZE];
+    struct timeval merge_time_limit;
+    gettimeofday(&merge_time_limit, NULL);
+
+    struct pollfd fds[2];
+    fds[0].fd = client_fd;
+    fds[0].events = POLLIN;
+    fds[1].fd = tun_fd;
+    fds[1].events = POLLIN;
+    float burst_bkt = 0;
 
     while (1) {
         memset(buffer, 0, BUF_SIZE);
-        fd_set readfds;
-        FD_ZERO(&readfds);
-        FD_SET(client_fd, &readfds);
-        FD_SET(tun_fd, &readfds);
-        int maxfd = (client_fd > tun_fd) ? client_fd : tun_fd;
 
-        // Set up timeout for select, to check merge buffer flush
-        struct timeval timeout;
-        timeout.tv_sec = 0;
-        timeout.tv_usec = MERGE_TIMEOUT_MS * 1000;
-
-        int ret = select(maxfd + 1, &readfds, NULL, NULL, &timeout);
+        int ret = poll(fds, 2, -1);  // -1 means wait indefinitely
         if (ret < 0) {
-            perror("select()");
+            perror("poll()");
             break;
         }
-
-        // === Handle timeout-based flush if no FD was ready ===
-        if (ret == 0 && merge_len > 0) {
-            struct timeval now;
-            gettimeofday(&now, NULL);
-            long elapsed_ms = (now.tv_sec - merge_last_time.tv_sec) * 1000 +
-                            (now.tv_usec - merge_last_time.tv_usec) / 1000;
-
-            LOG(LOG_TRACE, "select() timeout — checking flush: elapsed=%ld ms", elapsed_ms);
-
-            if (elapsed_ms >= MERGE_TIMEOUT_MS) {
-                LOG(LOG_DEBUG, "Timeout (%ld ms >= %d ms): flushing merge buffer (via select timeout)",
-                    elapsed_ms, MERGE_TIMEOUT_MS);
-
+        ////////////////////////////////////////////////
+        // Check merger buffer to flush ////////////////
+        ////////////////////////////////////////////////
+        struct timeval now;
+        gettimeofday(&now, NULL);
+        long elapsed_us = (now.tv_sec - merge_time_limit.tv_sec) * 1000000L +
+                        (now.tv_usec - merge_time_limit.tv_usec);
+        if (elapsed_us >= MERGE_TIME_WINDOW_US || merge_len >= MERGE_TARGET_SIZE) {  // Need to update "merge_time_limit" and flush merge_buf if needed
+            merge_time_limit = now;
+            // If there is remaining data in merged_buf, flush it.
+            if (merge_len > 0) {
                 if (write(client_fd, merge_buf, merge_len) < 0) {
-                    LOG(LOG_ERROR, "TUN -> Client write() on select timeout");
+                    LOG(LOG_ERROR, "Fail to flush merged_buf write() at the start of time window (TUN -> Client)");
                 } else {
-                    LOG(LOG_DEBUG,"Flushed %d bytes to client (via select timeout)", merge_len);
+                    LOG(LOG_DEBUG,"Flushed %d bytes to client at the start of time window (TUN -> Client)", merge_len);
+                    merge_len = 0;
                 }
-
-                merge_len = 0;
-                gettimeofday(&merge_last_time, NULL);
-                LOG(LOG_TRACE,"merge_last_time updated after select-timeout flush");
             }
         }
-
-        // === TUN -> CLIENT (MERGE & SEND) ===
-        if (FD_ISSET(tun_fd, &readfds)) {
-            LOG(LOG_DEBUG,"tun_fd is readable");
-
-            int n = read(tun_fd, buffer, BUF_SIZE);
-            LOG(LOG_DEBUG,"read() returned %d", n);
-
-            if (n > 0) {
-                LOG(LOG_DEBUG,"Read %d bytes from TUN", n);
-
-                // Sanity check on merge buffer size
-                if (merge_len + n + 2 > MERGE_TARGET_SIZE * 2) {
-                    LOG(LOG_DEBUG,"merge_buf overflow: current=%d, incoming=%d -> flushing early", merge_len, n);
-                    LOG(LOG_DEBUG,"About to write early flush (%d bytes)", merge_len);
-
+        /////////////////////////////////////////////
+        // === TUN -> CLIENT (merge) === ////////////
+        /////////////////////////////////////////////
+        if (fds[1].revents & POLLIN) {
+            int nread = read(tun_fd, buffer, BUF_SIZE);
+            if (nread > 0) {
+                LOG(LOG_DEBUG,"Read %d bytes from TUN", nread);
+                //Sanity check on merge buffer size
+                if (merge_len + nread + 2 > MERGE_TARGET_SIZE) {
+                    struct timeval now;
+                    gettimeofday(&now, NULL);
+                    long elapsed_us = (now.tv_sec - merge_time_limit.tv_sec) * 1000000L +
+                                    (now.tv_usec - merge_time_limit.tv_usec);    
+                    merge_time_limit = now;
                     if (write(client_fd, merge_buf, merge_len) < 0) {
-                        LOG(LOG_ERROR, "TUN -> Client early flush write()");
+                        LOG(LOG_ERROR, "Fail to flush merged_buf write() at the start of time window (TUN -> Client)");
                     } else {
-                        LOG(LOG_DEBUG,"Flushed %d bytes due to buffer overflow risk", merge_len);
+                        LOG(LOG_DEBUG,"Flushed %d bytes to client at the start of time window (TUN -> Client)", merge_len);
+                        merge_len = 0;
                     }
-
-                    merge_len = 0;
-                    gettimeofday(&merge_last_time, NULL);
-                    LOG(LOG_DEBUG,"merge_last_time updated after early flush");
                 }
-
                 // Prepend packet length (network order)
                 LOG(LOG_DEBUG,"Prepending length header and copying packet...");
-                merge_buf[merge_len] = (n >> 8) & 0xFF;
-                merge_buf[merge_len + 1] = n & 0xFF;
-                memcpy(merge_buf + merge_len + 2, buffer, n);
-                merge_len += n + 2;
-
-                if (merge_len == n + 2) {
-                    gettimeofday(&merge_last_time, NULL);
-                    LOG(LOG_DEBUG,"merge_last_time initialized after first packet");
-                }
-                LOG(LOG_DEBUG,"Appended packet of %d bytes (merge_len now %d)", n, merge_len);
-            } else if (n < 0) {
+                merge_buf[merge_len] = (nread >> 8) & 0xFF;
+                merge_buf[merge_len + 1] = nread & 0xFF;
+                memcpy(merge_buf + merge_len + 2, buffer, nread);
+                merge_len += nread + 2;
+                LOG(LOG_DEBUG,"Appended packet of %d bytes (merge_len now %d)", nread, merge_len);
+            } else if (nread < 0) {
                 LOG(LOG_ERROR, "TUN read()");
             } else {
                 LOG(LOG_DEBUG,"TUN read() returned 0 (EOF?)");
             }
-
-            // === Immediate flush if merge buffer full ===
-            LOG(LOG_DEBUG,"Checking if merge_len >= MERGE_TARGET_SIZE (%d >= %d)...", merge_len, MERGE_TARGET_SIZE);
-            if (merge_len >= MERGE_TARGET_SIZE) {
-                LOG(LOG_DEBUG,"merge_len %d >= MERGE_TARGET_SIZE %d: flushing", merge_len, MERGE_TARGET_SIZE);
-                if (write(client_fd, merge_buf, merge_len) < 0) {
-                    LOG(LOG_ERROR, "TUN -> Client write()");
-                } else {
-                    LOG(LOG_DEBUG,"Flushed %d bytes to client (merge full)", merge_len);
-                }
-                merge_len = 0;
-                gettimeofday(&merge_last_time, NULL);
-                LOG(LOG_DEBUG,"merge_last_time updated after full-buffer flush");
-            }
-
-            // === Timeout-based flush ===
-            else if (merge_len > 0) {
-                LOG(LOG_DEBUG,"Checking timeout-based flush...");
-                struct timeval now;
-                gettimeofday(&now, NULL);
-
-                long elapsed_ms = (now.tv_sec - merge_last_time.tv_sec) * 1000 +
-                                (now.tv_usec - merge_last_time.tv_usec) / 1000;
-
-                LOG(LOG_DEBUG,"Elapsed time since last flush: %ld ms", elapsed_ms);
-
-                if (elapsed_ms >= MERGE_TIMEOUT_MS) {
-                    LOG(LOG_DEBUG,"Timeout (%ld ms >= %d ms): flushing merge buffer", elapsed_ms, MERGE_TIMEOUT_MS);
-                    if (write(client_fd, merge_buf, merge_len) < 0) {
-                        LOG(LOG_ERROR, "TUN -> Client write()");
-                    } else {
-                        LOG(LOG_DEBUG,"Flushed %d bytes to client (timeout)", merge_len);
-                    }
-                    merge_len = 0;
-                    gettimeofday(&merge_last_time, NULL);
-                    LOG(LOG_DEBUG,"merge_last_time updated after timeout-based flush");
-                }
-            } else {
-                LOG(LOG_DEBUG,"merge_len is 0, skipping timeout flush check");
-            }
         }
-
-        // === CLIENT -> TUN (no merge needed) ===
-        if (FD_ISSET(client_fd, &readfds)) {
+        /////////////////////////////////////////////
+        // === CLIENT -> TUN (no merge needed) === //
+        /////////////////////////////////////////////
+        if (fds[0].revents & POLLIN) {
             LOG(LOG_TRACE, "client_fd is readable");
 
             int n = read_framed_packet(client_fd, buffer, BUF_SIZE);
@@ -310,7 +253,7 @@ void handle_client(int client_fd, int tun_fd, char *client_ip) {
 
             if (n < 0) {
                 LOG(LOG_INFO, "Client disconnected or error in framing.");
-                break; // Or mark connection as closed
+                break;
             } else if (n == 0) {
                 LOG(LOG_TRACE, "No complete framed packet available (n == 0)");
             } else {
@@ -319,19 +262,18 @@ void handle_client(int client_fd, int tun_fd, char *client_ip) {
                 if (w < 0) {
                     LOG(LOG_ERROR, "write(tun_fd) failed: Tried writing %d bytes to tun_fd=%d", n, tun_fd);
                     perror("write(tun_fd)");
-                    LOG(LOG_DEBUG,"First 16 bytes of buffer: ");
-                    // for (int i = 0; i < 16 && i < n; ++i)
-                    //     LOG(LOG_TRACE, stderr, "%02x ", (unsigned char)buffer[i]); 
                 } else {
                     LOG(LOG_DEBUG,"Successfully wrote %d bytes to tun_fd", w);
                 }
             }
         }
-    }   
+    }
+
     close(client_fd);
     close(tun_fd);
     exit(0);
 }
+
 int main(int argc, char *argv[]) {
     if (argc != 5) {
         fprintf(stderr, "Usage: %s <bind_ip> <port> <physical_interface> <dns_ip>\n", argv[0]);
@@ -407,24 +349,32 @@ int main(int argc, char *argv[]) {
     LOG(LOG_INFO,  "MPTCP tunnel server listening on %s:%d...", bind_ip, port);
 
     while (1) {
+        socklen_t cli_len = sizeof(cli_addr);  // ensure cli_len is reset each time
         int client_fd = accept(listen_fd, (struct sockaddr*)&cli_addr, &cli_len);
         if (client_fd < 0) {
             LOG(LOG_ERROR, "accept()");
             continue;
         }
 
-        // I tried MPTCP socket setting for traffic shaping. It didn't work for my purpose.
-        // I keep these lines since I may need them for other reasons in the future.
-        // int flag = 1;
-        // if (setsockopt(client_fd, IPPROTO_TCP, TCP_NODELAY, &flag, sizeof(flag)) < 0) {
-        //     perror("setsockopt(TCP_NODELAY)");
-        // }
+        // Optional: disable Nagle for latency-sensitive traffic
+        int flag = 1;
+        if (setsockopt(client_fd, IPPROTO_TCP, TCP_NODELAY, &flag, sizeof(flag)) < 0) {
+            perror("setsockopt(TCP_NODELAY)");
+        }
+
+        // Set TCP_NOTSENT_LOWAT for bufferbloat control
+        unsigned int lowat = 128 * 1024;
+        if (setsockopt(client_fd, IPPROTO_TCP, TCP_NOTSENT_LOWAT,
+                    &lowat, sizeof(lowat)) < 0) {
+            perror("setsockopt(TCP_NOTSENT_LOWAT)");
+        }
+
         // Avoid sending more than 1024 bytes at a time
         // int lowat = 2024;
         // setsockopt(client_fd, IPPROTO_TCP, TCP_NOTSENT_LOWAT, &lowat, sizeof(lowat));
 
         // // Keep total send buffer small (but not too small)
-        // int sndbuf = 8192;
+        // int sndbuf = 20480;
         // setsockopt(client_fd, SOL_SOCKET, SO_SNDBUF, &sndbuf, sizeof(sndbuf));
 
         LOG(LOG_INFO,  "New client from %s", inet_ntoa(cli_addr.sin_addr));
