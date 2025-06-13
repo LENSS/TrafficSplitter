@@ -14,6 +14,7 @@
 #include <sys/select.h>
 #include <arpa/inet.h>
 #include <signal.h>
+#include <poll.h>
 
 // === Logging Levels ===
 #define LOG_ERROR 0
@@ -51,7 +52,6 @@ int LOG_LEVEL = LOG_INFO;
 #define BUF_SIZE 8192
 const char *g_dns_ip = NULL;
 const char *g_tun_name = NULL;
-#define pkt_MSS 512
 
 void cleanup(int signo) {
     char cmd[256];
@@ -183,7 +183,6 @@ int read_framed_packet(int fd, char *buf, int maxlen) {
         }
         read_hdr += ret;
     }
-
     // Safely construct length
     uint16_t len = (hdr[0] << 8) | hdr[1];
 
@@ -208,7 +207,6 @@ int read_framed_packet(int fd, char *buf, int maxlen) {
                     fd, strerror(errno), errno);
             return -1;
         }
-
         received += n;
     }
 
@@ -292,20 +290,22 @@ int main(int argc, char *argv[]) {
 
     while (1) {
         memset(buffer, 0, BUF_SIZE);
-        fd_set readfds;
-        FD_ZERO(&readfds);
-        FD_SET(tun_fd, &readfds);
-        FD_SET(sock_fd, &readfds);
-        int maxfd = (tun_fd > sock_fd) ? tun_fd : sock_fd;
 
-        if (select(maxfd + 1, &readfds, NULL, NULL, NULL) < 0) {
-            perror("select()");
+        struct pollfd fds[2];
+        fds[0].fd = tun_fd;
+        fds[0].events = POLLIN;
+        fds[1].fd = sock_fd;
+        fds[1].events = POLLIN;
+
+        int ret = poll(fds, 2, -1);  // Block indefinitely until one becomes readable
+        if (ret < 0) {
+            perror("poll()");
             cleanup(0);
             exit(1);
         }
 
         // TUN → Proxy
-        if (FD_ISSET(tun_fd, &readfds)) {
+        if (fds[0].revents & POLLIN) {
             int nread = read(tun_fd, buffer, BUF_SIZE);
             if (nread > 0) {
                 uint16_t hdr = htons(nread);
@@ -317,8 +317,9 @@ int main(int argc, char *argv[]) {
                 }
             }
         }
+
         // Proxy → TUN
-        if (FD_ISSET(sock_fd, &readfds)) {
+        if (fds[1].revents & POLLIN) {
             LOG(LOG_TRACE, "sock_fd is readable");
 
             int n = read_framed_packet(sock_fd, buffer, BUF_SIZE);
@@ -339,14 +340,16 @@ int main(int argc, char *argv[]) {
                 }
             } else if (n == 0) {
                 LOG(LOG_TRACE, "No complete framed packet available (n == 0)");
-            } else { // n < 0
-                LOG(LOG_WARN,  "Server closed connection or framing error");
-                // Handle disconnect as needed (e.g., close sock_fd or set a done flag)
+            } else {
+                LOG(LOG_WARN, "Server closed connection or framing error");
+                // Optionally handle disconnect here
             }
         }
     }
+
     close(tun_fd);
     close(sock_fd);
     cleanup(0);
     return 0;
+
 }
