@@ -17,7 +17,6 @@
 #include <netinet/tcp.h>
 #include <sys/time.h>
 #include <poll.h>
-#include <time.h>
 
 // === Logging Levels ===
 #define LOG_ERROR 0
@@ -37,6 +36,15 @@ int LOG_LEVEL = LOG_INFO;
 #define COLOR_CYAN  "\033[0;36m"
 #define COLOR_GRAY  "\033[1;30m"
 
+// === MIN MAX for convenience ===
+#ifndef MIN
+#define MIN(a,b) ((a) < (b) ? (a) : (b))
+#endif
+
+#ifndef MAX
+#define MAX(a,b) ((a) > (b) ? (a) : (b))
+#endif
+
 // === Logging macro ===
 #define LOG(level, fmt, ...) \
     do { \
@@ -52,13 +60,8 @@ int LOG_LEVEL = LOG_INFO;
         } \
     } while (0)
 
-#define BUF_SIZE 16384
-#define MAX_CLIENTS 128
-#define MERGE_TARGET_SIZE 3000
-#define MERGE_TIME_WINDOW_US  10000 
-
-char merge_buf[MERGE_TARGET_SIZE*3];
-int merge_len = 0;
+#define BUF_SIZE 65536
+#define MAX_CLIENTS 1280
 
 typedef struct {
     pid_t pid;
@@ -170,76 +173,38 @@ int read_framed_packet(int fd, char *buf, int maxlen) {
 }
 
 void handle_client(int client_fd, int tun_fd, char *client_ip) {
-    char buffer[BUF_SIZE];
-    struct timeval merge_time_limit;
-    gettimeofday(&merge_time_limit, NULL);
+    char buffer[BUF_SIZE]; // buffer for general read() and write()
 
     struct pollfd fds[2];
     fds[0].fd = client_fd;
     fds[0].events = POLLIN;
     fds[1].fd = tun_fd;
     fds[1].events = POLLIN;
-    float burst_bkt = 0;
 
     while (1) {
         memset(buffer, 0, BUF_SIZE);
 
-        int ret = poll(fds, 2, -1);  // -1 means wait indefinitely
+        LOG(LOG_DEBUG, "Entering poll()");
+        int ret = poll(fds, 2, -1);
+        LOG(LOG_DEBUG, "poll() returned %d", ret);
         if (ret < 0) {
             perror("poll()");
             break;
         }
-        ////////////////////////////////////////////////
-        // Check merger buffer to flush ////////////////
-        ////////////////////////////////////////////////
-        struct timeval now;
-        gettimeofday(&now, NULL);
-        long elapsed_us = (now.tv_sec - merge_time_limit.tv_sec) * 1000000L +
-                        (now.tv_usec - merge_time_limit.tv_usec);
-        if (elapsed_us >= MERGE_TIME_WINDOW_US || merge_len >= MERGE_TARGET_SIZE) {  // Need to update "merge_time_limit" and flush merge_buf if needed
-            merge_time_limit = now;
-            // If there is remaining data in merged_buf, flush it.
-            if (merge_len > 0) {
-                if (write(client_fd, merge_buf, merge_len) < 0) {
-                    LOG(LOG_ERROR, "Fail to flush merged_buf write() at the start of time window (TUN -> Client)");
-                } else {
-                    LOG(LOG_DEBUG,"Flushed %d bytes to client at the start of time window (TUN -> Client)", merge_len);
-                    merge_len = 0;
-                }
-            }
-        }
-        /////////////////////////////////////////////
-        // === TUN -> CLIENT (merge) === ////////////
-        /////////////////////////////////////////////
+
+        //////////////////////////////////////////////////////////////////
+        // === TUN -> CLIENT (Keeping traffic in ctl_buf) === ////////////
+        //////////////////////////////////////////////////////////////////
         if (fds[1].revents & POLLIN) {
             int nread = read(tun_fd, buffer, BUF_SIZE);
             if (nread > 0) {
-                LOG(LOG_DEBUG,"Read %d bytes from TUN", nread);
-                //Sanity check on merge buffer size
-                if (merge_len + nread + 2 > MERGE_TARGET_SIZE) {
-                    struct timeval now;
-                    gettimeofday(&now, NULL);
-                    long elapsed_us = (now.tv_sec - merge_time_limit.tv_sec) * 1000000L +
-                                    (now.tv_usec - merge_time_limit.tv_usec);    
-                    merge_time_limit = now;
-                    if (write(client_fd, merge_buf, merge_len) < 0) {
-                        LOG(LOG_ERROR, "Fail to flush merged_buf write() at the start of time window (TUN -> Client)");
-                    } else {
-                        LOG(LOG_DEBUG,"Flushed %d bytes to client at the start of time window (TUN -> Client)", merge_len);
-                        merge_len = 0;
-                    }
+                uint16_t hdr = htons(nread);
+                if (write(client_fd, &hdr, 2) != 2){
+                    perror("TUN->Proxy header write()");
                 }
-                // Prepend packet length (network order)
-                LOG(LOG_DEBUG,"Prepending length header and copying packet...");
-                merge_buf[merge_len] = (nread >> 8) & 0xFF;
-                merge_buf[merge_len + 1] = nread & 0xFF;
-                memcpy(merge_buf + merge_len + 2, buffer, nread);
-                merge_len += nread + 2;
-                LOG(LOG_DEBUG,"Appended packet of %d bytes (merge_len now %d)", nread, merge_len);
-            } else if (nread < 0) {
-                LOG(LOG_ERROR, "TUN read()");
-            } else {
-                LOG(LOG_DEBUG,"TUN read() returned 0 (EOF?)");
+                if (write(client_fd, buffer, nread) != nread){
+                    perror("TUN->Proxy payload write()");
+                }
             }
         }
         /////////////////////////////////////////////
@@ -266,9 +231,11 @@ void handle_client(int client_fd, int tun_fd, char *client_ip) {
                     LOG(LOG_DEBUG,"Successfully wrote %d bytes to tun_fd", w);
                 }
             }
+        }else if (fds[0].revents & (POLLERR | POLLHUP | POLLNVAL)) {
+            LOG(LOG_ERROR, "client_fd poll error: revents = 0x%x", fds[0].revents);
+            break;  // or handle cleanup
         }
     }
-
     close(client_fd);
     close(tun_fd);
     exit(0);
