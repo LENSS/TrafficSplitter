@@ -15,6 +15,7 @@
 #include <arpa/inet.h>
 #include <signal.h>
 #include <poll.h>
+#include <sys/time.h>
 
 // === Logging Levels ===
 #define LOG_ERROR 0
@@ -34,6 +35,15 @@ int LOG_LEVEL = LOG_INFO;
 #define COLOR_CYAN  "\033[0;36m"
 #define COLOR_GRAY  "\033[1;30m"
 
+// === MIN MAX for convenience ===
+#ifndef MIN
+#define MIN(a,b) ((a) < (b) ? (a) : (b))
+#endif
+
+#ifndef MAX
+#define MAX(a,b) ((a) > (b) ? (a) : (b))
+#endif
+
 // === Logging macro ===
 #define LOG(level, fmt, ...) \
     do { \
@@ -49,7 +59,8 @@ int LOG_LEVEL = LOG_INFO;
         } \
     } while (0)
 
-#define BUF_SIZE 8192
+#define BUF_SIZE 65536
+
 const char *g_dns_ip = NULL;
 const char *g_tun_name = NULL;
 
@@ -270,55 +281,49 @@ int main(int argc, char *argv[]) {
 
     // 5. Set DNS server by updating resolv.conf
     system("cp /etc/resolv.conf /etc/resolv.conf.backup");
-    FILE *resolv = fopen("/etc/resolv.conf", "w");
-    if (resolv) {
-        fprintf(resolv, "nameserver %s\n", dns_ip);
-        fclose(resolv);
-        LOG(LOG_INFO,  "DNS server set to %s", dns_ip);
-    } else {
-        LOG(LOG_WARN,  "Failed to write /etc/resolv.conf");
-    }
+    snprintf(cmd, sizeof(cmd), "echo \"nameserver %s\" | tee /etc/resolv.conf", dns_ip);
+    system(cmd);
+    
+    // FILE *resolv = fopen("/etc/resolv.conf", "w");
+    // if (resolv) {
+    //     fprintf(resolv, "nameserver %s\n", dns_ip);
+    //     fclose(resolv);
+    //     LOG(LOG_INFO,  "DNS server set to %s", dns_ip);
+    // } else {
+    //     LOG(LOG_WARN,  "Failed to write /etc/resolv.conf");
+    // }
     snprintf(cmd, sizeof(cmd), "ip route replace %s dev %s", dns_ip, tun_name);
     system(cmd);
 
-    char buffer[BUF_SIZE];
     LOG(LOG_INFO,  "TUN device '%s' created and MPTCP (or TCP) connection established to %s:%d.", tun_name, server_ip, server_port);
 
     g_dns_ip = dns_ip;
     g_tun_name = tun_name;
     setup_signal_handlers();
 
+    char buffer[BUF_SIZE]; // buffer for general read() and write()
+
+    struct pollfd fds[2];
+    fds[0].fd = tun_fd;
+    fds[0].events = POLLIN;
+    fds[1].fd = sock_fd;
+    fds[1].events = POLLIN;
+
     while (1) {
         memset(buffer, 0, BUF_SIZE);
 
-        struct pollfd fds[2];
-        fds[0].fd = tun_fd;
-        fds[0].events = POLLIN;
-        fds[1].fd = sock_fd;
-        fds[1].events = POLLIN;
-
-        int ret = poll(fds, 2, -1);  // Block indefinitely until one becomes readable
+        LOG(LOG_DEBUG, "Entering poll()");
+        int ret = poll(fds, 2, -1);
+        LOG(LOG_DEBUG, "poll() returned %d", ret);
         if (ret < 0) {
             perror("poll()");
             cleanup(0);
             exit(1);
         }
 
-        // TUN → Proxy
-        if (fds[0].revents & POLLIN) {
-            int nread = read(tun_fd, buffer, BUF_SIZE);
-            if (nread > 0) {
-                uint16_t hdr = htons(nread);
-                if (write(sock_fd, &hdr, 2) != 2){
-                    perror("TUN->Proxy header write()");
-                }
-                if (write(sock_fd, buffer, nread) != nread){
-                    perror("TUN->Proxy payload write()");
-                }
-            }
-        }
-
-        // Proxy → TUN
+        /////////////////////////////////////////////
+        // === SERVER -> TUN (no merge needed) === //
+        /////////////////////////////////////////////
         if (fds[1].revents & POLLIN) {
             LOG(LOG_TRACE, "sock_fd is readable");
 
@@ -344,9 +349,26 @@ int main(int argc, char *argv[]) {
                 LOG(LOG_WARN, "Server closed connection or framing error");
                 // Optionally handle disconnect here
             }
+        }else if (fds[1].revents & (POLLERR | POLLHUP | POLLNVAL)) {
+            LOG(LOG_ERROR, "sock_fd poll error: revents = 0x%x", fds[0].revents);
+            break;  // or handle cleanup
+        }
+        //////////////////////////////////////////////////////////////////
+        // === TUN -> SERVER (Keeping traffic in ctl_buf) === ////////////
+        //////////////////////////////////////////////////////////////////
+        if (fds[0].revents & POLLIN) {
+            int nread = read(tun_fd, buffer, BUF_SIZE);
+            if (nread > 0) {
+                uint16_t hdr = htons(nread);
+                if (write(sock_fd, &hdr, 2) != 2){
+                    perror("TUN->Proxy header write()");
+                }
+                if (write(sock_fd, buffer, nread) != nread){
+                    perror("TUN->Proxy payload write()");
+                }
+            }
         }
     }
-
     close(tun_fd);
     close(sock_fd);
     cleanup(0);
