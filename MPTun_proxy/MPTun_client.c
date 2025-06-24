@@ -16,6 +16,7 @@
 #include <signal.h>
 #include <poll.h>
 #include <sys/time.h>
+#include <time.h>
 
 // === Logging Levels ===
 #define LOG_ERROR 0
@@ -60,6 +61,7 @@ int LOG_LEVEL = LOG_INFO;
     } while (0)
 
 #define BUF_SIZE 65536
+#define INIT_BYTES_PER_MS 1500.0
 
 const char *g_dns_ip = NULL;
 const char *g_tun_name = NULL;
@@ -309,9 +311,21 @@ int main(int argc, char *argv[]) {
     fds[1].fd = sock_fd;
     fds[1].events = POLLIN;
 
-    while (1) {
-        memset(buffer, 0, BUF_SIZE);
+    // Token bucket
+    double bytes_per_ms = INIT_BYTES_PER_MS;
+    double tokens = 0.0;
+    int token_scale_cnt = 0;
 
+    struct timeval last_refill;
+    struct timeval last_sent;
+    gettimeofday(&last_refill, NULL);
+    gettimeofday(&last_sent, NULL);
+
+    int rand_delay_ms = 0;
+    srand(time(NULL));
+
+    while (1) {
+        //memset(buffer, 0, BUF_SIZE);
         LOG(LOG_DEBUG, "Entering poll()");
         int ret = poll(fds, 2, -1);
         LOG(LOG_DEBUG, "poll() returned %d", ret);
@@ -319,6 +333,59 @@ int main(int argc, char *argv[]) {
             perror("poll()");
             cleanup(0);
             exit(1);
+        }
+        
+        // Check last sent
+        struct timeval now;
+        gettimeofday(&now, NULL);
+        double elapsed_since_sent_ms = (now.tv_sec - last_sent.tv_sec) * 1000.0 +
+                                       (now.tv_usec - last_sent.tv_usec) / 1000.0;
+        if (elapsed_since_sent_ms >= 10.0) { // No traffic for 10ms: reset
+            bytes_per_ms = INIT_BYTES_PER_MS;
+            token_scale_cnt = 0;
+            LOG(LOG_DEBUG, "Reset traffic control due to idle traffic state.");
+        }
+        // Refill tokens every 1ms
+        double elapsed_refill_ms = (now.tv_sec - last_refill.tv_sec) * 1000.0 +
+                                   (now.tv_usec - last_refill.tv_usec) / 1000.0;
+        if (elapsed_refill_ms >= 1){
+            if (tokens <= 0) token_scale_cnt += 1;
+            tokens += elapsed_refill_ms * bytes_per_ms;
+            if (tokens > bytes_per_ms){
+                tokens = bytes_per_ms;
+                token_scale_cnt -= 1;
+            }
+            last_refill = now;
+        }
+        // Adaptive scaling
+        if (token_scale_cnt >= 10) {
+            bytes_per_ms *= 1.5;
+            if (bytes_per_ms > BUF_SIZE) // put a reasonable cap
+                bytes_per_ms = BUF_SIZE;
+            token_scale_cnt = 0;
+        }
+        else if(token_scale_cnt <= -10){
+            bytes_per_ms = MAX(INIT_BYTES_PER_MS, bytes_per_ms*0.5);
+            token_scale_cnt = 0;
+        }
+
+        //////////////////////////////////////////////////////////////////
+        // === TUN -> SERVER (Keeping traffic in ctl_buf) === ////////////
+        //////////////////////////////////////////////////////////////////
+        if (fds[0].revents & POLLIN && tokens > 0 && elapsed_since_sent_ms >= rand_delay_ms) {
+            int nread = read(tun_fd, buffer, BUF_SIZE);
+            if (nread > 0) {
+                uint16_t hdr = htons(nread);
+                if (write(sock_fd, &hdr, 2) != 2){
+                    perror("TUN->Proxy header write()");
+                }
+                if (write(sock_fd, buffer, nread) != nread){
+                    perror("TUN->Proxy payload write()");
+                }
+                tokens -= nread + 2;
+                rand_delay_ms = (double)rand() / RAND_MAX;
+                gettimeofday(&last_sent, NULL);
+            }
         }
 
         /////////////////////////////////////////////
@@ -353,25 +420,9 @@ int main(int argc, char *argv[]) {
             LOG(LOG_ERROR, "sock_fd poll error: revents = 0x%x", fds[0].revents);
             break;  // or handle cleanup
         }
-        //////////////////////////////////////////////////////////////////
-        // === TUN -> SERVER (Keeping traffic in ctl_buf) === ////////////
-        //////////////////////////////////////////////////////////////////
-        if (fds[0].revents & POLLIN) {
-            int nread = read(tun_fd, buffer, BUF_SIZE);
-            if (nread > 0) {
-                uint16_t hdr = htons(nread);
-                if (write(sock_fd, &hdr, 2) != 2){
-                    perror("TUN->Proxy header write()");
-                }
-                if (write(sock_fd, buffer, nread) != nread){
-                    perror("TUN->Proxy payload write()");
-                }
-            }
-        }
     }
     close(tun_fd);
     close(sock_fd);
     cleanup(0);
     return 0;
-
 }
