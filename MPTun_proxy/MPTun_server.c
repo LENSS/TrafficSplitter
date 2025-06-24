@@ -208,7 +208,7 @@ void handle_client(int client_fd, int tun_fd, char *client_ip) {
             }
         }
         /////////////////////////////////////////////
-        // === CLIENT -> TUN (no merge needed) === //
+        // === CLIENT -> TUN (No merge needed) === //
         /////////////////////////////////////////////
         if (fds[0].revents & POLLIN) {
             LOG(LOG_TRACE, "client_fd is readable");
