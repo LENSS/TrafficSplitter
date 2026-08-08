@@ -141,25 +141,4 @@ sudo "${CLIENT}" \
 
 CLIENT_PID=$!
 
-# VirtualBox-specific adjustment:
-# MPTun adds a host route to the server via the NAT gateway.
-# Since the server is directly reachable on the same subnet,
-# remove the route as soon as MPTun creates it.
-
-for _ in {1..100}; do
-    if ip route show "${SERVER_IP}" | \
-        grep -q "via ${GATEWAY_IP} dev ${PHYSICAL_IFACE}"; then
-
-        sudo ip route del "${SERVER_IP}" \
-            via "${GATEWAY_IP}" \
-            dev "${PHYSICAL_IFACE}" \
-            2>/dev/null || true
-
-        echo "[INFO] Removed VirtualBox-specific server route."
-        break
-    fi
-
-    sleep 0.01
-done
-
 wait "${CLIENT_PID}"
