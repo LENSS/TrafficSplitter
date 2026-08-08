@@ -102,7 +102,7 @@ Please note that we have shell scripts for the following procedure. You may want
    CONFIG_SYSTEM_TRUSTED_KEYS="certs/mycert.pem"
    CONFIG_MODULE_SIG_KEY="certs/mycert.pem"
    ```
-
+![cert config](img/.png)
 8. Compile and install the kernel (It takes some time....)
 
    ```bash
