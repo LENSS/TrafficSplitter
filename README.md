@@ -217,6 +217,10 @@ Then, assign (or check) the network adapters of each VM. Please note that the us
    <img src="img/net-adapter-proxy.png" alt="cert config" width="600">
 </p>
 
+This configuration generates the network topology shown below. In the following evaluations, we establish an MPTCP tunnel between the user and the proxy, collect network traces, and conduct a simple, scaled-down traffic-analysis evaluation across various defense configurations.
+<p align="center">
+   <img src="img/net-topology.png" alt="network topology (AI generated)" width="600">
+</p>
 
 # To Do List
 
