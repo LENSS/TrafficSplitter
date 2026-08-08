@@ -175,7 +175,7 @@ Please note that we have shell scripts for the following procedure. You may want
 > If you are using the provided OVA files, the VM password is `ndss2027`.
 
 ### NAT Network Setup
-We assume that you have already installed VirtualBox and prepared the two VMs by either following `AE-VMsetup.pdf` or importing the OVA files provided with the artifact. First, create a VirtualBox NAT Network named `aeNet` for communication between the two VMs.
+We assume that you have already installed VirtualBox and prepared the two VMs by either following instructions or importing the OVA files provided with the artifact. First, create a VirtualBox NAT Network named `aeNet` for communication between the two VMs.
 
 **Linux Host**
 
