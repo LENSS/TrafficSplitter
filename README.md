@@ -222,9 +222,10 @@ This configuration generates the network topology shown below. In the following 
    <img src="img/net-topology.png" alt="network topology (AI generated)" width="800">
 </p>
 
-# To Do List
+# (5) Basic Functionality Test
 
-- MPTCP Setup on proxy and client
-- Data Collection Scripts
-  - collected trace visualization
-- Scale-down Evaluation Scripts
+# (6) Collecting Traffic Traces
+
+# (7) Scale-down Traffic Analysis Evaluation
+
+
