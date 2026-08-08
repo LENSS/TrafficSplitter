@@ -102,7 +102,10 @@ Please note that we have shell scripts for the following procedure. You may want
    CONFIG_SYSTEM_TRUSTED_KEYS="certs/mycert.pem"
    CONFIG_MODULE_SIG_KEY="certs/mycert.pem"
    ```
-![cert config](img/.png)
+<p align="center">
+   <img src="img/cert_config.png" alt="cert config" width="600">
+</p>
+
 8. Compile and install the kernel (It takes some time....)
 
    ```bash
@@ -171,9 +174,10 @@ Please note that we have shell scripts for the following procedure. You may want
 
 > If you are using the provided OVA files, the VM password is `ndss2027`.
 
+### NAT Network Setup
 We assume that you have already installed VirtualBox and prepared the two VMs by either following `AE-VMsetup.pdf` or importing the OVA files provided with the artifact. First, create a VirtualBox NAT Network named `aeNet` for communication between the two VMs.
 
-## Linux Host
+**Linux Host**
 
 Open a terminal and run:
 
@@ -186,8 +190,7 @@ VBoxManage dhcpserver modify   --network aeNet   --server-ip 192.168.10.2   --lo
 
 VBoxManage dhcpserver restart --network aeNet
 ```
-
-## Window Host
+**Window Host**
 
 Open Command Prompt or PowerShell and run:
 
@@ -200,12 +203,20 @@ VBoxManage.exe dhcpserver restart --network aeNet
 
 If Windows reports that `VBoxManage.exe` is not recognized, run the commands from the VirtualBox installation directory (e.g., `C:\Program Files\Oracle\VirtualBox`).
 
+### VMs Network Adapters
 Then, assign (or check) the network adapters of each VM. Please note that the user (i.e., client) has to have two network adapters, while the proxy server needs one.
 
 - **User (Client):** Two NAT Network adapters, both attached to `aeNet`.
-- **Proxy-server:** One NAT Network adapter attached to `aeNet`.
+<p align="center">
+   <img src="img/net-adapter-user1.png" alt="cert config" width="600">
+   <img src="img/net-adapter-user2.png" alt="cert config" width="600">
+</p>
 
-The screenshots on page 5 of the original document show the corresponding VirtualBox Network settings for the two client adapters and the single proxy-server adapter.
+- **Proxy-server:** One NAT Network adapter attached to `aeNet`.
+<p align="center">
+   <img src="img/net-adapter-proxy.png" alt="cert config" width="600">
+</p>
+
 
 # To Do List
 
