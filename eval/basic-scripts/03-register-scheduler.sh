@@ -37,9 +37,22 @@ if [[ ! -f "${BPF_OBJECT}" ]]; then
     echo "[ERROR] BPF object not found:"
     echo "        ${BPF_OBJECT}"
     echo
-    echo "Run scripts/03-build-schedulers.sh first."
+    echo "Run the scheduler build script first."
     exit 1
 fi
+
+# ------------------------------------------------------------
+# Check whether scheduler is already registered
+# ------------------------------------------------------------
+
+if sudo bpftool struct_ops show 2>/dev/null | grep -qw "${SCHEDULER}"; then
+    echo "[SKIP] Scheduler '${SCHEDULER}' is already registered."
+    exit 0
+fi
+
+# ------------------------------------------------------------
+# Register scheduler
+# ------------------------------------------------------------
 
 echo "[INFO] Running kernel: $(uname -r)"
 echo "[INFO] Registering:"
