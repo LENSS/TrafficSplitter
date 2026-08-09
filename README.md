@@ -444,29 +444,31 @@ Optionally, you can run our implementation of BWR with MPTun and eBPF and monito
 </p>
 (Subflow manager output on terminal)
 
-# (6) Collecting Traffic Traces
+# (6) Evaluation Goal
+
+In this AE, we conduct a scaled-down traffic-analysis evaluation using two defense configurations:
+
+- **TrafficSplitter**
+- **BWR**
+
+The purpose of this evaluation is to demonstrate the difference between the two defenses:
+
+- TrafficSplitter is designed to provide a more comprehensive defense against both **website fingerprinting (WF)** and **video fingerprinting (VF)**, as well as other traffic-analysis attacks that fall between them.
+- BWR is a traffic-splitting defense designed primarily for **website fingerprinting** and is therefore used as an attack-specific baseline.
+
+We evaluate both defenses using website and video traffic traces collected from the client VM.
+
+# (7) Collecting Traffic Traces
 
 Before conducting the traffic-analysis evaluation, we first prepare traffic traces.
 
 In this AE, we assume a **single-path eavesdropper**. Therefore, traffic is collected from the first network interface of the client VM.
 
-> If you are using the provided OVA files, pre-collected traffic traces are already included. In that case, you may skip this section and proceed directly to the traffic-analysis evaluation.
-
-## 6.1 Evaluation Goal
-
-We collect website and video traffic under two defense configurations:
-
-- **TrafficSplitter**
-- **BWR**
-
-The purpose of this scaled-down evaluation is to demonstrate the difference between the two defenses:
-
-- TrafficSplitter is designed to defend against both **website fingerprinting (WF)** and **video fingerprinting (VF)**.
-- BWR is a traffic-splitting defense designed primarily for **website fingerprinting**, and is therefore used as an attack-specific baseline.
-
 The client generates traffic by visiting websites or playing YouTube videos in Google Chrome while `tcpdump` records traffic on the selected client interface.
 
-## 6.2 Start the Defense Configuration
+> If you are using the provided OVA files, pre-collected traffic traces are already included. In that case, you may skip this section and proceed directly to the traffic-analysis evaluation.
+
+## 7.1 Start the Defense Configuration
 
 On both VMs, move to the evaluation directory:
 
@@ -506,7 +508,7 @@ sudo ./01-run-func/run-bwr-client.sh
 
 > BWR does not use the Saflo subflow manager component.
 
-## 6.3 Collect Website Traces
+## 7.2 Collect Website Traces
 
 Open a new terminal tab on the **client VM** and run:
 
@@ -517,51 +519,51 @@ Open a new terminal tab on the **client VM** and run:
 For example, when collecting traces with TrafficSplitter:
 
 ```bash
-./02-data/collection/web-collecting.sh trafficsplitter
+./02-data-collection/web-collecting.sh trafficsplitter
 ```
 
 For BWR:
 
 ```bash
-./02-data/collection/web-collecting.sh bwr
+./02-data-collection/web-collecting.sh bwr
 ```
 
-## 6.4 Collect Video Traces
+## 7.3 Collect Video Traces
 
 Similarly, collect video traces using:
 
 ```bash
-./02-data/collection/video-collecting.sh <trace-name>
+./02-data/collection-video-collecting.sh <trace-name>
 ```
 
 For example:
 
 ```bash
-./02-data/collection/video-collecting.sh trafficsplitter
+./02-data/collection-video-collecting.sh trafficsplitter
 ```
 
 or:
 
 ```bash
-./02-data/collection/video-collecting.sh bwr
+./02-data/collection-video-collecting.sh bwr
 ```
 
-## 6.5 Run Website and Video Collection Sequentially
+## 7.4 Run Website and Video Collection Sequentially
 
 You may also run both collection scripts sequentially.
 
 For TrafficSplitter:
 
 ```bash
-./02-data/collection/web-collecting.sh trafficsplitter && \
-./02-data/collection/video-collecting.sh trafficsplitter
+./02-data-collection/web-collecting.sh trafficsplitter && \
+./02-data-collection/video-collecting.sh trafficsplitter
 ```
 
 For BWR:
 
 ```bash
-./02-data/collection/web-collecting.sh bwr && \
-./02-data/collection/video-collecting.sh bwr
+./02-data-collection/web-collecting.sh bwr && \
+./02-data-collection/video-collecting.sh bwr
 ```
 
 # (7) Scale-down Traffic Analysis Evaluation
