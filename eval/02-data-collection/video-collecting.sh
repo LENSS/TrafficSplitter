@@ -109,7 +109,9 @@ for video_idx in "${!VIDEOS[@]}"; do
         # Open video
         # ----------------------------------------------------
 
-        setsid google-chrome "https://${VIDEO}" \
+        setsid google-chrome \
+            --autoplay-policy=no-user-gesture-required \
+            "https://${VIDEO}" \
             >/dev/null 2>&1 &
 
         BROWSER_PID=$!
