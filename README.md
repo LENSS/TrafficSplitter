@@ -524,7 +524,13 @@ In this AE, we assume a **single-path eavesdropper**. Therefore, traffic is coll
 
 The client generates traffic by visiting websites or playing YouTube videos in Google Chrome while `tcpdump` records traffic on the selected client interface.
 
-> If you are using the provided OVA files, **pre-collected traffic traces are already included**. In that case, you may skip this section and proceed directly to the [scaled-down traffic-analysis evaluation](#6-scaled-down-traffic-analysis-evaluation).
+Importantly, we provide **pre-collected traffic traces are already included**. So, if your goal is to evaluate the reproducibility of our work or just simply test traffic analysis evaluation, you may skip this section and proceed directly to the [scaled-down traffic-analysis evaluation](#6-scaled-down-traffic-analysis-evaluation). You just need to unzip the pre-collected traces included in our git repository.
+
+```bash
+sudo apt install unzip
+cd ~/ndss27/TrafficSplitter/eval/02-data-collection
+unzip "*.zip"
+```
 
 ## 5.1 Start the Defense Configuration
 
