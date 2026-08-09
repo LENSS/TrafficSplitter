@@ -446,6 +446,124 @@ Optionally, you can run our implementation of BWR with MPTun and eBPF and monito
 
 # (6) Collecting Traffic Traces
 
+Before conducting the traffic-analysis evaluation, we first prepare traffic traces.
+
+In this AE, we assume a **single-path eavesdropper**. Therefore, traffic is collected from the first network interface of the client VM.
+
+> If you are using the provided OVA files, pre-collected traffic traces are already included. In that case, you may skip this section and proceed directly to the traffic-analysis evaluation.
+
+## 6.1 Evaluation Goal
+
+We collect website and video traffic under two defense configurations:
+
+- **TrafficSplitter**
+- **BWR**
+
+The purpose of this scaled-down evaluation is to demonstrate the difference between the two defenses:
+
+- TrafficSplitter is designed to defend against both **website fingerprinting (WF)** and **video fingerprinting (VF)**.
+- BWR is a traffic-splitting defense designed primarily for **website fingerprinting**, and is therefore used as an attack-specific baseline.
+
+The client generates traffic by visiting websites or playing YouTube videos in Google Chrome while `tcpdump` records traffic on the selected client interface.
+
+## 6.2 Start the Defense Configuration
+
+On both VMs, move to the evaluation directory:
+
+```bash
+cd ~/ndss27/TrafficSplitter/eval
+```
+
+As in Section (5), start the **server first**, followed by the **client**.
+
+### TrafficSplitter
+
+On the proxy server VM:
+
+```bash
+sudo ./01-run-func/run-trafficsplitter-server.sh
+```
+
+On the client VM:
+
+```bash
+sudo ./01-run-func/run-trafficsplitter-client.sh
+```
+
+### BWR
+
+On the proxy server VM:
+
+```bash
+sudo ./01-run-func/run-bwr-server.sh
+```
+
+On the client VM:
+
+```bash
+sudo ./01-run-func/run-bwr-client.sh
+```
+
+> BWR does not use the Saflo subflow manager component.
+
+## 6.3 Collect Website Traces
+
+Open a new terminal tab on the **client VM** and run:
+
+```bash
+./02-data/collection/web-collecting.sh <trace-name>
+```
+
+For example, when collecting traces with TrafficSplitter:
+
+```bash
+./02-data/collection/web-collecting.sh trafficsplitter
+```
+
+For BWR:
+
+```bash
+./02-data/collection/web-collecting.sh bwr
+```
+
+## 6.4 Collect Video Traces
+
+Similarly, collect video traces using:
+
+```bash
+./02-data/collection/video-collecting.sh <trace-name>
+```
+
+For example:
+
+```bash
+./02-data/collection/video-collecting.sh trafficsplitter
+```
+
+or:
+
+```bash
+./02-data/collection/video-collecting.sh bwr
+```
+
+## 6.5 Run Website and Video Collection Sequentially
+
+You may also run both collection scripts sequentially.
+
+For TrafficSplitter:
+
+```bash
+./02-data/collection/web-collecting.sh trafficsplitter && \
+./02-data/collection/video-collecting.sh trafficsplitter
+```
+
+For BWR:
+
+```bash
+./02-data/collection/web-collecting.sh bwr && \
+./02-data/collection/video-collecting.sh bwr
+```
+
 # (7) Scale-down Traffic Analysis Evaluation
 
 
