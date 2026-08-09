@@ -103,7 +103,7 @@ Please note that we have shell scripts for the following procedure. You may want
    CONFIG_MODULE_SIG_KEY="certs/mycert.pem"
    ```
 <p align="center">
-   <img src="img/cert_config.png" alt="cert config" width="600">
+   <img src="img/cert_config.png" alt="cert config" width="400">
 </p>
 
 8. Compile and install the kernel (It takes some time....)
@@ -380,7 +380,7 @@ Prepare **two terminal tabs** on each VM:
 On the **proxy server VM**, run the following command in the first terminal tab:
 
 ```bash
-sudo ./01-basic-func/run-server.sh
+sudo ./01-run-func/run-trafficsplitter-server.sh
 ```
 
 The script configures MPTCP, registers and selects the Saflo scheduler, starts the MPTun proxy server, and starts the Saflo subflow manager.
@@ -388,7 +388,7 @@ The script configures MPTCP, registers and selects the Saflo scheduler, starts t
 In the second terminal tab, monitor the subflow manager log:
 
 ```bash
-tail -f 01-basic-func/subflow-manager.log
+tail -f 01-run-func/subflow-manager.log
 ```
 
 The log shows kernel-level MPTCP subflow information and the operation of the Saflo scheduler.
@@ -398,13 +398,13 @@ The log shows kernel-level MPTCP subflow information and the operation of the Sa
 On the **client VM**, run the following command in the first terminal tab:
 
 ```bash
-sudo ./01-basic-func/run-client.sh
+sudo ./01-run-func/run-trafficsplitter-client.sh
 ```
 
 In the second terminal tab, monitor the client-side subflow manager log:
 
 ```bash
-tail -f 01-basic-func/subflow-manager.log
+tail -f 01-run-func/subflow-manager.log
 ```
 
 After the client connects to the proxy, you should observe that the MPTCP tunnel is established with **two subflows**. The log also shows kernel-level information about the subflows and the operation of the Saflo scheduler.
@@ -437,7 +437,8 @@ A successful basic functionality test should show:
 - Saflo scheduler activity in the subflow manager log; and
 - network traffic distributed across both client interfaces.
 
-When you are finished, press `Ctrl+C` in the terminal running `run-server.sh` and `run-client.sh` to stop the evaluation processes.
+When you are finished, press `Ctrl+C` in the terminals running `run-trafficsplitter-server.sh` and `run-trafficsplitter-client.sh` to stop the evaluation processes.
+Optionally, you can run our implementation of BWR with MPTun and eBPF and monitor its operation using `run-bwr-server.sh` and `run-bwr-client.sh`.
 
 # (6) Collecting Traffic Traces
 
