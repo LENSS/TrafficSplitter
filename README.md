@@ -1,6 +1,6 @@
 # Introduction
 
-This document describes introductions for the NDSS Artifact Evaluation (AE) process. We provide the VMs as OVA files for the reproduction of evaluations and simple test runs. **If you use OVA files, you can skip VM setup steps (1) and proceed [from (2)](#2-before-starting-the-evaluations).**
+This document describes instructions for the NDSS Artifact Evaluation (AE) process. We provide the VMs as OVA files for the reproduction of evaluations and simple test runs. **If you use OVA files, you can skip VM setup steps (1) and proceed [from (2)](#2-before-starting-the-evaluations).**
 
 # (1) VM Setup
 
