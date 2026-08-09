@@ -360,6 +360,85 @@ The client VM uses two network interfaces for MPTCP, while the proxy VM provides
 
 # (5) Basic Functionality Test
 
+This test verifies that the MPTCP tunnel is established correctly, that two subflows are created, and that the Saflo scheduler operates as expected.
+
+## 5.1 Preparation
+
+On both the **client VM** and the **proxy server VM**, open a terminal and move to the `eval` directory of the TrafficSplitter repository:
+
+```bash
+cd ~/ndss27/TrafficSplitter/eval
+```
+
+Prepare **two terminal tabs** on each VM:
+
+- **Tab 1:** Run the evaluation script.
+- **Tab 2:** Monitor the Saflo subflow manager log.
+
+## 5.2 Start the Proxy Server
+
+On the **proxy server VM**, run the following command in the first terminal tab:
+
+```bash
+sudo ./01-basic-func/run-server.sh
+```
+
+The script configures MPTCP, registers and selects the Saflo scheduler, starts the MPTun proxy server, and starts the Saflo subflow manager.
+
+In the second terminal tab, monitor the subflow manager log:
+
+```bash
+tail -f 01-basic-func/subflow-manager.log
+```
+
+The log shows kernel-level MPTCP subflow information and the operation of the Saflo scheduler.
+
+## 5.3 Start the Client
+
+On the **client VM**, run the following command in the first terminal tab:
+
+```bash
+sudo ./01-basic-func/run-client.sh
+```
+
+In the second terminal tab, monitor the client-side subflow manager log:
+
+```bash
+tail -f 01-basic-func/subflow-manager.log
+```
+
+After the client connects to the proxy, you should observe that the MPTCP tunnel is established with **two subflows**. The log also shows kernel-level information about the subflows and the operation of the Saflo scheduler.
+
+## 5.4 Observe Traffic Distribution
+
+You can additionally inspect how traffic is distributed across the two client interfaces using Wireshark.
+
+On the **client VM**, open another terminal tab and run:
+
+```bash
+sudo wireshark
+```
+
+In Wireshark, monitor both client network interfaces.
+
+Then, open Firefox and generate some traffic, for example by:
+
+- visiting several websites, or
+- playing an online video.
+
+Observe how the MPTCP traffic is distributed across the two network interfaces.
+
+## 5.5 Expected Result
+
+A successful basic functionality test should show:
+
+- the MPTCP tunnel established between the client and proxy;
+- two active MPTCP subflows;
+- Saflo scheduler activity in the subflow manager log; and
+- network traffic distributed across both client interfaces.
+
+When you are finished, press `Ctrl+C` in the terminal running `run-server.sh` and `run-client.sh` to stop the evaluation processes.
+
 # (6) Collecting Traffic Traces
 
 # (7) Scale-down Traffic Analysis Evaluation
