@@ -10,7 +10,7 @@ This document describes introductions for the NDSS Artifact Evaluation (AE) proc
 1. Download the Ubuntu 24.04 Desktop image from:
    - https://releases.ubuntu.com/noble/
 
-2. Create VirtualBox VM.
+2. Create two VirtualBox VMs; one for client and another for proxy server.
    - We recommend allocating at least **50 GB of storage, 3 CPU cores, and 8 GB of RAM**. These resources are mainly required for the kernel compilation process. After the kernel has been successfully compiled and installed, you can reduce the allocated resources if needed.
 
 3. Install Ubuntu 24.04 Desktop on the VM.
