@@ -126,6 +126,9 @@ Please note that shell scripts are provided for the following procedure. You may
    CONFIG_SYSTEM_TRUSTED_KEYS="certs/mycert.pem"
    CONFIG_MODULE_SIG_KEY="certs/mycert.pem"
    ```
+<p align="center">
+   <img src="img/cert_config.png" alt="cert config" width="400">
+</p>
 
 8. Compile and install the kernel.
 
@@ -397,6 +400,7 @@ The expected IP address is:
 <p align="center">
    <img src="img/net-adapter-proxy.png" alt="cert config" width="300">
 </p>
+
 ```text
 NIC 1: 192.168.10.12
 ```
@@ -459,6 +463,10 @@ tail -f 01-run-func/subflow-manager.log
 ```
 
 After the client connects to the proxy, you should observe that the MPTCP tunnel is established with **two subflows**. The log also shows kernel-level information about the subflows and the operation of the Saflo scheduler.
+
+<p align="center">
+   <img src="img/running-subflow.png" alt="cert config" width="400">
+</p>
 
 ## 3.4 Observe Traffic Distribution
 
