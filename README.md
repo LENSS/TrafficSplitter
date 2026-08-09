@@ -170,57 +170,193 @@ Please note that we have shell scripts for the following procedure. You may want
    sudo rm tools/ -r
    ```
 
-# (4) Before Start Evaluations
+# (4) Before Starting the Evaluations
 
 > If you are using the provided OVA files, the VM password is `ndss2027`.
 
-### NAT Network Setup
-We assume that you have already installed VirtualBox and prepared the two VMs by either following instructions or importing the OVA files provided with the artifact. First, create a VirtualBox NAT Network named `aeNet` for communication between the two VMs. This should be done on your host machine.
+## 4.1 NAT Network Setup
 
-**Linux Host**
+We assume that you have already installed VirtualBox and prepared the two VMs either by following the VM setup instructions or by importing the OVA files provided with the artifact.
 
-Open a terminal and run:
+Before starting the evaluation, create a VirtualBox NAT Network named `aeNet` on the **host machine**. This network enables communication between the client and proxy VMs.
+
+The intended IP configuration is:
+
+| Machine | Adapter | IP Address |
+|---|---|---|
+| User (Client) | NIC 1 | `192.168.10.10` |
+| User (Client) | NIC 2 | `192.168.10.11` |
+| Proxy Server | NIC 1 | `192.168.10.12` |
+| NAT Gateway | — | `192.168.10.1` |
+| DHCP Server | — | `192.168.10.2` |
+
+The dynamic DHCP pool is configured as `192.168.10.100–192.168.10.254`, leaving the lower addresses available for the fixed VM addresses.
+
+### Linux Host
+
+Open a terminal on the host machine.
+
+#### 1. Create and start the NAT Network
 
 ```bash
-VBoxManage natnetwork add   --netname aeNet   --network "192.168.10.0/24"   --enable   --dhcp on
+VBoxManage natnetwork add \
+  --netname aeNet \
+  --network "192.168.10.0/24" \
+  --enable \
+  --dhcp on
+```
 
+```bash
 VBoxManage natnetwork start --netname aeNet
+```
 
-VBoxManage dhcpserver modify   --network aeNet   --server-ip 192.168.10.2   --lower-ip 192.168.10.10   --upper-ip 192.168.10.254   --netmask 255.255.255.0   --enable
+#### 2. Configure the DHCP server
 
+```bash
+VBoxManage dhcpserver modify \
+  --network aeNet \
+  --server-ip 192.168.10.2 \
+  --lower-ip 192.168.10.100 \
+  --upper-ip 192.168.10.254 \
+  --netmask 255.255.255.0 \
+  --enable
+```
+
+#### 3. Check the VM names
+
+Before assigning the fixed IP addresses, check the names of the imported VMs:
+
+```bash
+VBoxManage list vms
+```
+
+The following commands assume that the VM names are:
+
+- `user`
+- `proxy-server`
+
+If your VM names are different, replace them accordingly in the commands below.
+
+#### 4. Assign fixed IP addresses
+
+Client NIC 1:
+
+```bash
+VBoxManage dhcpserver modify \
+  --network aeNet \
+  --vm "user" \
+  --nic 1 \
+  --fixed-address 192.168.10.10
+```
+
+Client NIC 2:
+
+```bash
+VBoxManage dhcpserver modify \
+  --network aeNet \
+  --vm "user" \
+  --nic 2 \
+  --fixed-address 192.168.10.11
+```
+
+Proxy Server NIC 1:
+
+```bash
+VBoxManage dhcpserver modify \
+  --network aeNet \
+  --vm "proxy-server" \
+  --nic 1 \
+  --fixed-address 192.168.10.12
+```
+
+#### 5. Restart the DHCP server
+
+```bash
 VBoxManage dhcpserver restart --network aeNet
 ```
-**Window Host**
 
-Open Command Prompt or PowerShell and run:
+### Windows Host
+
+Open **Command Prompt** or **PowerShell** on the host machine.
+
+#### 1. Create and start the NAT Network
 
 ```text
 VBoxManage.exe natnetwork add --netname aeNet --network "192.168.10.0/24" --enable --dhcp on
 VBoxManage.exe natnetwork start --netname aeNet
-VBoxManage.exe dhcpserver modify --network aeNet --server-ip 192.168.10.2 --lower-ip 192.168.10.10 --upper-ip 192.168.10.254 --netmask 255.255.255.0 --enable
+```
+
+#### 2. Configure the DHCP server
+
+```text
+VBoxManage.exe dhcpserver modify --network aeNet --server-ip 192.168.10.2 --lower-ip 192.168.10.100 --upper-ip 192.168.10.254 --netmask 255.255.255.0 --enable
+```
+
+#### 3. Check the VM names
+
+```text
+VBoxManage.exe list vms
+```
+
+The following commands assume that the VM names are `user` and `proxy-server`. If your VM names are different, replace them accordingly.
+
+#### 4. Assign fixed IP addresses
+
+```text
+VBoxManage.exe dhcpserver modify --network aeNet --vm "user" --nic 1 --fixed-address 192.168.10.10
+VBoxManage.exe dhcpserver modify --network aeNet --vm "user" --nic 2 --fixed-address 192.168.10.11
+VBoxManage.exe dhcpserver modify --network aeNet --vm "proxy-server" --nic 1 --fixed-address 192.168.10.12
+```
+
+#### 5. Restart the DHCP server
+
+```text
 VBoxManage.exe dhcpserver restart --network aeNet
 ```
 
-If Windows reports that `VBoxManage.exe` is not recognized, run the commands from the VirtualBox installation directory (e.g., `C:\Program Files\Oracle\VirtualBox`).
+If Windows reports that `VBoxManage.exe` is not recognized, run the commands from the VirtualBox installation directory, for example:
 
-### VMs Network Adapters
-Then, assign (or check) the network adapters of each VM. Please note that the user (i.e., client) has to have two network adapters, while the proxy server needs one.
+```text
+C:\Program Files\Oracle\VirtualBox
+```
 
-- **User (Client):** Two NAT Network adapters, both attached to `aeNet`.
+## 4.2 VM Network Adapter Configuration
+
+After creating the NAT Network, configure the network adapters of the two VMs.
+
+### User (Client)
+
+The client VM requires **two network adapters**:
+
+- Adapter 1: NAT Network → `aeNet`
+- Adapter 2: NAT Network → `aeNet`
+
+The expected IP addresses are:
+
+```text
+NIC 1: 192.168.10.10
+NIC 2: 192.168.10.11
+```
+
+### Proxy Server
+
+The proxy VM requires **one network adapter**:
+
+- Adapter 1: NAT Network → `aeNet`
+
+The expected IP address is:
+
+```text
+NIC 1: 192.168.10.12
+```
+
+## 4.3 Expected Network Topology
+
+This configuration generates the network topology shown below.
 <p align="center">
-   <img src="img/net-adapter-user1.png" alt="cert config" width="600">
-   <img src="img/net-adapter-user2.png" alt="cert config" width="600">
+   <img src="img/net-topology.png" alt="cert config" width="600">
 </p>
-
-- **Proxy-server:** One NAT Network adapter attached to `aeNet`.
-<p align="center">
-   <img src="img/net-adapter-proxy.png" alt="cert config" width="600">
-</p>
-
-This configuration generates the network topology shown below. In the following evaluations, we establish an MPTCP tunnel between the user and the proxy, collect network traces, and conduct a simple, scaled-down traffic-analysis evaluation across various defense configurations.
-<p align="center">
-   <img src="img/net-topology.png" alt="network topology (AI generated)" width="800">
-</p>
+The client VM uses two network interfaces for MPTCP, while the proxy VM provides the remote MPTCP endpoint. Both VMs communicate through the VirtualBox `aeNet` NAT Network, and outbound traffic is forwarded through the host machine to the Internet. In the following evaluations, we establish an MPTCP tunnel between the user and the proxy, collect network traces, and conduct a scaled-down traffic-analysis evaluation.
 
 # (5) Basic Functionality Test
 
