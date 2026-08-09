@@ -58,10 +58,26 @@ echo "[INFO] Running kernel: $(uname -r)"
 echo "[INFO] Registering:"
 echo "       ${BPF_OBJECT}"
 
-sudo bpftool struct_ops register "${BPF_OBJECT}"
+REGISTER_STATUS=0
 
-echo
-echo "[PASS] Registration completed."
+REGISTER_OUTPUT="$(
+    sudo bpftool struct_ops register "${BPF_OBJECT}" 2>&1
+)" || REGISTER_STATUS=$?
+
+if [[ "${REGISTER_STATUS}" -eq 0 ]]; then
+    echo
+    echo "[PASS] Registration completed."
+
+elif echo "${REGISTER_OUTPUT}" | grep -q "File exists"; then
+    echo
+    echo "[SKIP] Scheduler '${SCHEDULER}' is already registered."
+
+else
+    echo
+    echo "[ERROR] Failed to register scheduler '${SCHEDULER}':"
+    echo "${REGISTER_OUTPUT}"
+    exit "${REGISTER_STATUS}"
+fi
 
 echo
 echo "[INFO] Registered struct_ops:"
