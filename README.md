@@ -1,25 +1,41 @@
 # Introduction
 
-This document describes introductions for the NDSS Artifact Evaluation (AE) process. We provide the VMs as OVA files for the reproduction of evaluations and simple test runs. **If you use OVA files, you can skip VM setup steps (1)-(3) and proceed [from (4)](#4-before-starting-the-evaluations).**
+This document describes introductions for the NDSS Artifact Evaluation (AE) process. We provide the VMs as OVA files for the reproduction of evaluations and simple test runs. **If you use OVA files, you can skip VM setup steps (1) and proceed [from (2)](#2-before-starting-the-evaluations).**
+
+# (1) VM Setup
+
+This section describes how to prepare the client and proxy-server VMs for the TrafficSplitter artifact evaluation.
+
+> If you are using the provided OVA files, you may skip this section.
 
 - The VM setup consists of two main steps: (1) installing Ubuntu 24.04 Desktop on VirtualBox and (2) installing the custom Linux kernel. We use Ubuntu 24.04 Desktop rather than the Server edition to make the overall evaluation process easier and more user-friendly.
 - Our system uses a non-mainline Linux kernel. We began developing the system when the MPTCP eBPF scheduler was still an experimental feature and had not yet been included in the mainline Linux kernel. Since then, the MPTCP eBPF scheduler has become an official kernel feature. However, we continue to use the older custom kernel because (1) the eBPF-related structures have changed in newer kernel versions, and (2) our system has already been extensively tested and is stable with the kernel version used during development and evaluation.
 
-# (1) Ubuntu Installation
+## 1.1 Ubuntu Installation
 
 1. Download the Ubuntu 24.04 Desktop image from:
-   - https://releases.ubuntu.com/noble/
 
-2. Create two VirtualBox VMs; one for client and another for proxy server.
-   - We recommend allocating at least **50 GB of storage, 3 CPU cores, and 8 GB of RAM**. These resources are mainly required for the kernel compilation process. After the kernel has been successfully compiled and installed, you can reduce the allocated resources if needed.
+   - [https://releases.ubuntu.com/noble/](https://releases.ubuntu.com/noble/)
 
-3. Install Ubuntu 24.04 Desktop on the VM.
+2. Create two VirtualBox VMs:
+   - one for the **client**;
+   - one for the **proxy server**.
 
-# (2) Kernel Installation
+   We recommend allocating at least:
 
-Please note that we have shell scripts for the following procedure. You may want to simply run the scripts.
+   - **50 GB of storage**
+   - **3 CPU cores**
+   - **8 GB of RAM**
 
-1. Using Git, clone the kernel repository and check out the exact version used in our artifact.
+   These resources are mainly required for kernel compilation. After the kernel has been successfully compiled and installed, you may reduce the allocated resources if needed.
+
+3. Install Ubuntu 24.04 Desktop on both VMs.
+
+## 1.2 Custom Kernel Installation
+
+Please note that shell scripts are provided for the following procedure. You may use the scripts instead of performing each step manually.
+
+1. Clone the MPTCP kernel repository and check out the exact version used in our artifact.
 
    ```bash
    git clone https://github.com/multipath-tcp/mptcp_net-next.git
@@ -36,7 +52,7 @@ Please note that we have shell scripts for the following procedure. You may want
    sudo vim /etc/apt/sources.list.d/ubuntu.sources
    ```
 
-   Replace or update the contents so that both binary packages (`deb`) and source packages (`deb-src`) are enabled, and make sure the required Ubuntu repositories are included:
+   Replace or update the contents so that both binary packages (`deb`) and source packages (`deb-src`) are enabled:
 
    ```text
    Types: deb deb-src
@@ -54,31 +70,39 @@ Please note that we have shell scripts for the following procedure. You may want
 
    This configuration enables access to both binary and source packages from the standard Ubuntu 24.04 repositories. The source repositories are required for installing some kernel build dependencies and related development packages.
 
-3. Run `apt update` and upgrade.
+3. Update and upgrade the system:
 
    ```bash
    sudo apt update
    sudo apt upgrade
    ```
 
-4. Install the packages for the build environment.
+4. Install the required kernel build dependencies:
 
    ```bash
    sudo apt-get build-dep linux linux-image-unsigned-$(uname -r)
-   sudo apt-get install libncurses-dev gawk flex bison openssl        libssl-dev dkms libelf-dev libudev-dev libpci-dev libiberty-dev        autoconf
+   sudo apt-get install libncurses-dev gawk flex bison openssl \
+       libssl-dev dkms libelf-dev libudev-dev libpci-dev libiberty-dev \
+       autoconf
    ```
 
-5. Copy the existing kernel configuration into the `mptcp_net-next` directory.
+5. Copy the current kernel configuration into the `mptcp_net-next` directory:
 
    ```bash
-   cp /boot/config-(your current kernel version) .config
+   cp /boot/config-$(uname -r) .config
    make olddefconfig
    ```
 
-6. Generate a self-signed certificate for kernel module signing. From the `mptcp_net-next` directory, run:
+6. Generate a self-signed certificate for kernel module signing.
+
+   From the `mptcp_net-next` directory, run:
 
    ```bash
-   openssl req -x509 -newkey rsa:4096 -keyout certs/mycert.pem -out certs/mycert.pem -nodes -days 3650
+   openssl req -x509 -newkey rsa:4096 \
+       -keyout certs/mycert.pem \
+       -out certs/mycert.pem \
+       -nodes \
+       -days 3650
    ```
 
 7. Update the kernel configuration to use the generated certificate.
@@ -96,17 +120,16 @@ Please note that we have shell scripts for the following procedure. You may want
    CONFIG_MODULE_SIG_KEY
    ```
 
-   Update them to reference the certificate generated in the previous step:
+   Update them as follows:
 
    ```text
    CONFIG_SYSTEM_TRUSTED_KEYS="certs/mycert.pem"
    CONFIG_MODULE_SIG_KEY="certs/mycert.pem"
    ```
-<p align="center">
-   <img src="img/cert_config.png" alt="cert config" width="400">
-</p>
 
-8. Compile and install the kernel (It takes some time....)
+8. Compile and install the kernel.
+
+   > This step may take some time.
 
    ```bash
    make -j$(nproc)
@@ -131,50 +154,73 @@ Please note that we have shell scripts for the following procedure. You may want
    GRUB_TIMEOUT=10
    ```
 
-   After making these changes, update the GRUB configuration:
+   Then update the GRUB configuration:
 
    ```bash
    sudo update-grub
    ```
 
-   On the next reboot, select the desired kernel from the GRUB menu. GRUB should remember this selection for subsequent boots.
+   Reboot the VM and select the newly installed kernel from the GRUB menu.
 
-# (3) TrafficSplitter Build
+   GRUB should remember the selected kernel for subsequent boots.
 
-1. Clone our git repository.
+10. After rebooting, verify the running kernel:
+
+   ```bash
+   uname -r
+   ```
+
+## 1.3 TrafficSplitter Build
+
+1. Clone the TrafficSplitter repository:
 
    ```bash
    git clone https://github.com/LENSS/TrafficSplitter.git
    ```
 
-2. Move to the `src` directory and run scripts to build BPF tools, MPTun proxy servers/clients, and MPTCP schedulers.
+2. Move to the `src` directory:
 
    ```bash
    cd TrafficSplitter/src/
-   sudo chmod +x ./scripts/*.sh
+   ```
+
+3. Make the build scripts executable:
+
+   ```bash
+   chmod +x ./scripts/*.sh
+   ```
+
+4. Run the provided scripts to install the BPF tools and build the TrafficSplitter components:
+
+   ```bash
    sudo ./scripts/01-install-bpf-tools.sh
    sudo ./scripts/02-generate-vmlinux-header.sh
    sudo ./scripts/03-build-schedulers.sh
    sudo ./scripts/04-build-mptun.sh
    ```
 
-3. You can check the resulting files.
+   These scripts build the required BPF tools, MPTCP schedulers, and MPTun client/server binaries.
+
+5. Verify the generated files:
 
    ```bash
-   ls MPTun_proxy/build/ Saflo_scheduler/build/
+   ls MPTun_proxy/build/
+   ls Saflo_scheduler/build/
    ```
 
-4. Optionally, you can remove the `bpftool` files as it is already installed.
+6. Optionally, remove the local `bpftool` source directory after installation:
 
    ```bash
-   sudo rm tools/ -r
+   sudo rm -rf tools/
    ```
 
-# (4) Before Starting the Evaluations
+After completing these steps on both VMs, proceed to the VirtualBox network configuration.
+
+# (2) Before Starting the Evaluations
 
 > If you are using the provided OVA files, the VM password is `ndss2027`.
 
-## 4.1 NAT Network Setup
+## 2.1 NAT Network Setup
 
 We assume that you have already installed VirtualBox and prepared the two VMs either by following the VM setup instructions or by importing the OVA files provided with the artifact.
 
@@ -320,7 +366,7 @@ If Windows reports that `VBoxManage.exe` is not recognized, run the commands fro
 C:\Program Files\Oracle\VirtualBox
 ```
 
-## 4.2 VM Network Adapter Configuration
+## 2.2 VM Network Adapter Configuration
 
 After creating the NAT Network, configure the network adapters of the two VMs.
 
@@ -355,7 +401,7 @@ The expected IP address is:
 NIC 1: 192.168.10.12
 ```
 
-## 4.3 Expected Network Topology
+## 2.3 Expected Network Topology
 
 This configuration generates the network topology shown below.
 <p align="center">
@@ -363,11 +409,11 @@ This configuration generates the network topology shown below.
 </p>
 The client VM uses two network interfaces for MPTCP, while the proxy VM provides the remote MPTCP endpoint. Both VMs communicate through the VirtualBox `aeNet` NAT Network, and outbound traffic is forwarded through the host machine to the Internet. In the following evaluations, we establish an MPTCP tunnel between the user and the proxy, collect network traces, and conduct a scaled-down traffic-analysis evaluation.
 
-# (5) Basic Functionality Test
+# (3) Basic Functionality Test
 
 This test verifies that the MPTCP tunnel is established correctly, that two subflows are created, and that the Saflo scheduler operates as expected.
 
-## 5.1 Preparation
+## 3.1 Preparation
 
 On both the **client VM** and the **proxy server VM**, open a terminal and move to the `eval` directory of the TrafficSplitter repository:
 
@@ -380,7 +426,7 @@ Prepare **two terminal tabs** on each VM:
 - **Tab 1:** Run the evaluation script.
 - **Tab 2:** Monitor the Saflo subflow manager log.
 
-## 5.2 Start the Proxy Server
+## 3.2 Start the Proxy Server
 
 On the **proxy server VM**, run the following command in the first terminal tab:
 
@@ -398,7 +444,7 @@ tail -f 01-run-func/subflow-manager.log
 
 The log shows kernel-level MPTCP subflow information and the operation of the Saflo scheduler.
 
-## 5.3 Start the Client
+## 3.3 Start the Client
 
 On the **client VM**, run the following command in the first terminal tab:
 
@@ -413,11 +459,8 @@ tail -f 01-run-func/subflow-manager.log
 ```
 
 After the client connects to the proxy, you should observe that the MPTCP tunnel is established with **two subflows**. The log also shows kernel-level information about the subflows and the operation of the Saflo scheduler.
-<p align="center">
-   <img src="img/running-subflow.png" alt="cert config" width="600">
-</p>
 
-## 5.4 Observe Traffic Distribution
+## 3.4 Observe Traffic Distribution
 
 You can additionally inspect how traffic is distributed across the two client interfaces using Wireshark.
 
@@ -431,24 +474,27 @@ In Wireshark, monitor both client network interfaces.
 
 Then, open Firefox and generate some traffic, for example by:
 
-- visiting several websites, or
+- visiting several websites; or
 - playing an online video.
 
-Observe how the MPTCP traffic is distributed across the two network interfaces.
+Observe how MPTCP traffic is distributed across the two network interfaces.
 
-## 5.5 Expected Result
+## 3.5 Expected Result
 
 A successful basic functionality test should show:
 
-- the MPTCP tunnel established between the client and proxy;
+- an MPTCP tunnel established between the client and proxy;
 - two active MPTCP subflows;
 - Saflo scheduler activity in the subflow manager log; and
 - network traffic distributed across both client interfaces.
 
 When you are finished, press `Ctrl+C` in the terminals running `run-trafficsplitter-server.sh` and `run-trafficsplitter-client.sh` to stop the evaluation processes.
-Optionally, you can run our implementation of BWR with MPTun and eBPF, instead of TrafficSplitter, and monitor its operation using `run-bwr-server.sh` and `run-bwr-client.sh`.
 
-# (6) Evaluation Goal
+Optionally, you can run our BWR implementation with MPTun and eBPF instead of TrafficSplitter and monitor its operation using `run-bwr-server.sh` and `run-bwr-client.sh`.
+
+> BWR does not use the Saflo subflow manager component.
+
+# (4) Evaluation Goal
 
 In this AE, we conduct a scaled-down traffic-analysis evaluation using two defense configurations:
 
@@ -458,11 +504,11 @@ In this AE, we conduct a scaled-down traffic-analysis evaluation using two defen
 The purpose of this evaluation is to demonstrate the difference between the two defenses:
 
 - TrafficSplitter is designed to provide a more comprehensive defense against both **website fingerprinting (WF)** and **video fingerprinting (VF)**, as well as other traffic-analysis attacks that fall between them.
-- BWR is a traffic-splitting defense designed primarily for **website fingerprinting** and is therefore used as an attack-specific baseline (i.e., ineffective against VF).
+- BWR is a traffic-splitting defense designed primarily for **website fingerprinting** and is therefore used as an attack-specific baseline (i.e., it is ineffective against VF).
 
 We evaluate both defenses using website and video traffic traces collected from the client VM.
 
-# (7) Collecting Traffic Traces
+# (5) Collecting Traffic Traces
 
 Before conducting the traffic-analysis evaluation, we first prepare traffic traces.
 
@@ -470,9 +516,9 @@ In this AE, we assume a **single-path eavesdropper**. Therefore, traffic is coll
 
 The client generates traffic by visiting websites or playing YouTube videos in Google Chrome while `tcpdump` records traffic on the selected client interface.
 
-> If you are using the provided OVA files, **pre-collected traffic traces are already included**. In that case, you may skip this section and proceed directly to the [traffic-analysis evaluation](#8-scale-down-traffic-analysis-evaluation).
+> If you are using the provided OVA files, **pre-collected traffic traces are already included**. In that case, you may skip this section and proceed directly to the [scaled-down traffic-analysis evaluation](#6-scaled-down-traffic-analysis-evaluation).
 
-## 7.1 Start the Defense Configuration
+## 5.1 Start the Defense Configuration
 
 On both VMs, move to the evaluation directory:
 
@@ -480,7 +526,7 @@ On both VMs, move to the evaluation directory:
 cd ~/ndss27/TrafficSplitter/eval
 ```
 
-As in Section (5), start the **server first**, followed by the **client**.
+As in Section (3), start the **server first**, followed by the **client**.
 
 ### TrafficSplitter
 
@@ -512,7 +558,7 @@ sudo ./01-run-func/run-bwr-client.sh
 
 > BWR does not use the Saflo subflow manager component.
 
-## 7.2 Collect Website Traces
+## 5.2 Collect Website Traces
 
 Open a new terminal tab on the **client VM** and run:
 
@@ -523,53 +569,53 @@ Open a new terminal tab on the **client VM** and run:
 For example, when collecting traces with TrafficSplitter:
 
 ```bash
-./02-data-collection/web-collecting.sh trafficsplitter
+./02-data/collection/web-collecting.sh trafficsplitter
 ```
 
 For BWR:
 
 ```bash
-./02-data-collection/web-collecting.sh bwr
+./02-data/collection/web-collecting.sh bwr
 ```
 
-## 7.3 Collect Video Traces
+## 5.3 Collect Video Traces
 
 Similarly, collect video traces using:
 
 ```bash
-./02-data/collection-video-collecting.sh <trace-name>
+./02-data/collection/video-collecting.sh <trace-name>
 ```
 
-For example:
+For example, when collecting traces with TrafficSplitter:
 
 ```bash
-./02-data/collection-video-collecting.sh trafficsplitter
-```
-
-or:
-
-```bash
-./02-data/collection-video-collecting.sh bwr
-```
-
-## 7.4 Run Website and Video Collection Sequentially
-
-You may also run both collection scripts sequentially.
-
-For TrafficSplitter:
-
-```bash
-./02-data-collection/web-collecting.sh trafficsplitter && \
-./02-data-collection/video-collecting.sh trafficsplitter
+./02-data/collection/video-collecting.sh trafficsplitter
 ```
 
 For BWR:
 
 ```bash
-./02-data-collection/web-collecting.sh bwr && \
-./02-data-collection/video-collecting.sh bwr
+./02-data/collection/video-collecting.sh bwr
 ```
 
-# (8) Scale-down Traffic Analysis Evaluation
+## 5.4 Run Website and Video Collection Sequentially
 
+You may also run the website and video collection scripts sequentially.
 
+For TrafficSplitter:
+
+```bash
+./02-data/collection/web-collecting.sh trafficsplitter && \
+./02-data/collection/video-collecting.sh trafficsplitter
+```
+
+For BWR:
+
+```bash
+./02-data/collection/web-collecting.sh bwr && \
+./02-data/collection/video-collecting.sh bwr
+```
+
+The second collection script starts only after the first one completes successfully.
+
+# (6) Scaled-Down Traffic-Analysis Evaluation
