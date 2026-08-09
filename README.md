@@ -1,6 +1,6 @@
 # Introduction
 
-This document describes introductions for the NDSS Artifact Evaluation (AE) process. We provide the VMs as OVA files for the reproduction of evaluations and simple test runs. **If you use OVA files, you can skip VM setup steps (1)-(3) and proceed from (4).**
+This document describes introductions for the NDSS Artifact Evaluation (AE) process. We provide the VMs as OVA files for the reproduction of evaluations and simple test runs. **If you use OVA files, you can skip VM setup steps (1)-(3) and proceed [from (4)](#-(4)-Before-Starting-the-Evaluations).**
 
 - The VM setup consists of two main steps: (1) installing Ubuntu 24.04 Desktop on VirtualBox and (2) installing the custom Linux kernel. We use Ubuntu 24.04 Desktop rather than the Server edition to make the overall evaluation process easier and more user-friendly.
 - Our system uses a non-mainline Linux kernel. We began developing the system when the MPTCP eBPF scheduler was still an experimental feature and had not yet been included in the mainline Linux kernel. Since then, the MPTCP eBPF scheduler has become an official kernel feature. However, we continue to use the older custom kernel because (1) the eBPF-related structures have changed in newer kernel versions, and (2) our system has already been extensively tested and is stable with the kernel version used during development and evaluation.
@@ -330,7 +330,10 @@ The client VM requires **two network adapters**:
 
 - Adapter 1: NAT Network → `aeNet`
 - Adapter 2: NAT Network → `aeNet`
-
+<p align="center">
+   <img src="img/net-adapter-user1.png" alt="cert config" width="300">
+   <img src="img/net-adapter-user2.png" alt="cert config" width="300">
+</p>
 The expected IP addresses are:
 
 ```text
@@ -345,7 +348,9 @@ The proxy VM requires **one network adapter**:
 - Adapter 1: NAT Network → `aeNet`
 
 The expected IP address is:
-
+<p align="center">
+   <img src="img/net-adapter-proxy.png" alt="cert config" width="300">
+</p>
 ```text
 NIC 1: 192.168.10.12
 ```
@@ -408,6 +413,9 @@ tail -f 01-run-func/subflow-manager.log
 ```
 
 After the client connects to the proxy, you should observe that the MPTCP tunnel is established with **two subflows**. The log also shows kernel-level information about the subflows and the operation of the Saflo scheduler.
+<p align="center">
+   <img src="img/running-subflow.png" alt="cert config" width="600">
+</p>
 
 ## 5.4 Observe Traffic Distribution
 
@@ -438,11 +446,7 @@ A successful basic functionality test should show:
 - network traffic distributed across both client interfaces.
 
 When you are finished, press `Ctrl+C` in the terminals running `run-trafficsplitter-server.sh` and `run-trafficsplitter-client.sh` to stop the evaluation processes.
-Optionally, you can run our implementation of BWR with MPTun and eBPF and monitor its operation using `run-bwr-server.sh` and `run-bwr-client.sh`.
-<p align="center">
-   <img src="img/running-subflow.png" alt="cert config" width="600">
-</p>
-(Subflow manager output on terminal)
+Optionally, you can run our implementation of BWR with MPTun and eBPF, instead of TrafficSplitter, and monitor its operation using `run-bwr-server.sh` and `run-bwr-client.sh`.
 
 # (6) Evaluation Goal
 
@@ -454,7 +458,7 @@ In this AE, we conduct a scaled-down traffic-analysis evaluation using two defen
 The purpose of this evaluation is to demonstrate the difference between the two defenses:
 
 - TrafficSplitter is designed to provide a more comprehensive defense against both **website fingerprinting (WF)** and **video fingerprinting (VF)**, as well as other traffic-analysis attacks that fall between them.
-- BWR is a traffic-splitting defense designed primarily for **website fingerprinting** and is therefore used as an attack-specific baseline.
+- BWR is a traffic-splitting defense designed primarily for **website fingerprinting** and is therefore used as an attack-specific baseline (i.e., ineffective against VF).
 
 We evaluate both defenses using website and video traffic traces collected from the client VM.
 
@@ -566,6 +570,6 @@ For BWR:
 ./02-data-collection/video-collecting.sh bwr
 ```
 
-# (7) Scale-down Traffic Analysis Evaluation
+# (8) Scale-down Traffic Analysis Evaluation
 
 
