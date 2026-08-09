@@ -470,7 +470,7 @@ In this AE, we assume a **single-path eavesdropper**. Therefore, traffic is coll
 
 The client generates traffic by visiting websites or playing YouTube videos in Google Chrome while `tcpdump` records traffic on the selected client interface.
 
-> If you are using the provided OVA files, pre-collected traffic traces are already included. In that case, you may skip this section and proceed directly to the traffic-analysis evaluation.
+> If you are using the provided OVA files, **pre-collected traffic traces are already included**. In that case, you may skip this section and proceed directly to the [traffic-analysis evaluation](#8-scale-down-traffic-analysis-evaluation).
 
 ## 7.1 Start the Defense Configuration
 
