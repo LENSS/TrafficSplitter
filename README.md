@@ -439,6 +439,10 @@ A successful basic functionality test should show:
 
 When you are finished, press `Ctrl+C` in the terminals running `run-trafficsplitter-server.sh` and `run-trafficsplitter-client.sh` to stop the evaluation processes.
 Optionally, you can run our implementation of BWR with MPTun and eBPF and monitor its operation using `run-bwr-server.sh` and `run-bwr-client.sh`.
+<p align="center">
+   <img src="img/running-subflow.png" alt="cert config" width="600">
+</p>
+(Subflow manager output on terminal)
 
 # (6) Collecting Traffic Traces
 
