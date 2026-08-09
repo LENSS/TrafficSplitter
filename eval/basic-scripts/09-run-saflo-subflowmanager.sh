@@ -46,7 +46,7 @@ echo
 
 echo "[INFO] Starting Saflo subflow manager..."
 
-exec sudo "${SUBFLOW_MANAGER}" \
+exec sudo stdbuf -oL -eL "${SUBFLOW_MANAGER}" \
     -i "${INTERVAL}" \
     -x "${MAX_PROB}" \
     -n "${MIN_PROB}"
