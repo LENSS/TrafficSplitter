@@ -155,7 +155,7 @@ Please note that we have shell scripts for the following procedure. You may want
    sudo ./scripts/01-install-bpf-tools.sh
    sudo ./scripts/02-generate-vmlinux-header.sh
    sudo ./scripts/03-build-schedulers.sh
-   sudo ./scripts/07-build-mptun.sh
+   sudo ./scripts/04-build-mptun.sh
    ```
 
 3. You can check the resulting files.
