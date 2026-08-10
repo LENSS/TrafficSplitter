@@ -629,3 +629,89 @@ For BWR:
 The second collection script starts only after the first one completes successfully.
 
 # (6) Scaled-Down Traffic-Analysis Evaluation
+
+This evaluation is conducted on the **client VM**, where the traffic traces are available.
+
+## 6.1 Prerequisites
+
+Before running the evaluation, make sure the required Python packages are installed:
+
+```bash
+pip install tensorflow pandas matplotlib
+```
+
+`matplotlib` is optional and is only needed for plotting or inspecting traces.
+
+The extracted traffic traces should be located under:
+
+```text
+~/ndss2027/TrafficSplitter/eval/02-data-collection/
+```
+
+For example, the traffic traces should be organized into the following directories:
+
+```text
+bwr-video-traces
+bwr-web-traces
+trafficsplitter-video-traces
+trafficsplitter-web-traces
+```
+
+## 6.2 Run the Evaluation
+
+Move to the traffic-analysis evaluation directory:
+
+```bash
+cd ~/ndss2027/TrafficSplitter/eval/03-traffic-analysis
+```
+
+Then run:
+
+```bash
+./run-traffic-analysis.sh
+```
+
+The script automatically:
+
+1. preprocesses the TrafficSplitter and BWR website traces;
+2. preprocesses the TrafficSplitter and BWR video traces;
+3. trains and evaluates the website-fingerprinting classifier;
+4. trains and evaluates the video-fingerprinting classifier; and
+5. prints a summary table in the terminal.
+
+Please note that, because this AE uses a substantially smaller dataset than the full evaluation in the paper, we use **lighter versions of the WF and VF classifiers** to reduce training time and computational requirements on the VM.
+
+At the end of the evaluation, you should see a summary similar to:
+
+```text
+============================================================
+ Traffic-Analysis Evaluation Results
+============================================================
+
+Attack                    | TrafficSplitter  | BWR
+--------------------------+------------------+-----------------
+Website Fingerprinting    | ...              | ...
+Video Fingerprinting      | ...              | ...
+
+Values represent mean validation accuracy across the 5 folds.
+```
+
+## 6.3 Clear Evaluation Results
+
+After the evaluation, you can remove all generated TFRecords, trained models, and evaluation logs by running:
+
+```bash
+./run-traffic-analysis.sh --clear
+```
+
+This command does **not** remove the original collected traffic traces.
+
+## 6.4 Result Interpretation
+
+The exact accuracy values may differ from the full-scale results reported in the paper because this AE uses a much smaller dataset and lighter attack classifiers. However, the scaled-down evaluation is intended to reproduce the **main behavioral difference** between BWR and TrafficSplitter.
+
+TrafficSplitter is designed to provide broader protection against multiple traffic-analysis attacks. Therefore, it should remain effective against both **website fingerprinting (WF)** and **video fingerprinting (VF)**.
+
+In contrast, BWR is primarily designed as a website-fingerprinting defense. Its effectiveness is therefore expected to degrade more noticeably under the VF attack.
+
+The purpose of this scaled-down experiment is not to reproduce the exact numerical results from the paper, but to demonstrate the paper's key observation: **TrafficSplitter provides more comprehensive protection against different types of traffic-analysis attacks, whereas existing traffic-splitting defenses such as BWR are more attack-specific.**
