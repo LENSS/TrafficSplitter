@@ -2,6 +2,36 @@
 
 set -euo pipefail
 
+
+# ------------------------------------------------------------
+# Python environment
+# ------------------------------------------------------------
+
+# Prefer the local virtual environment used by the AE setup.
+if [[ -x ".venv/bin/python" ]]; then
+    PYTHON=".venv/bin/python"
+    echo "[INFO] Using Python virtual environment: ${PYTHON}"
+else
+    PYTHON="$(command -v python3 || true)"
+
+    if [[ -z "${PYTHON}" ]]; then
+        echo "[ERROR] Python 3 was not found." >&2
+        echo "Please create the AE virtual environment before running this script." >&2
+        exit 1
+    fi
+
+    echo "[WARN] .venv was not found; using: ${PYTHON}"
+fi
+
+# Verify required packages before starting the evaluation.
+if ! "${PYTHON}" -c "import tensorflow, pandas" >/dev/null 2>&1; then
+    echo "[ERROR] Required Python packages are missing." >&2
+    echo "Please install TensorFlow and pandas in the AE virtual environment:" >&2
+    echo "  .venv/bin/python -m pip install tensorflow pandas" >&2
+    exit 1
+fi
+
+
 # ============================================================
 # Traffic Analysis Evaluation
 #
@@ -90,28 +120,28 @@ echo "============================================================"
 echo
 
 echo "[INFO] TrafficSplitter video traces..."
-python3 02-preprocess_VF_bps.py \
+"${PYTHON}" 02-preprocess_VF_bps.py \
     ../02-data-collection/trafficsplitter-video-traces \
     trafficsplitter-video-tfrecord/
 
 echo
 
 echo "[INFO] BWR video traces..."
-python3 02-preprocess_VF_bps.py \
+"${PYTHON}" 02-preprocess_VF_bps.py \
     ../02-data-collection/bwr-video-traces \
     bwr-video-tfrecord/
 
 echo
 
 echo "[INFO] TrafficSplitter website traces..."
-python3 03-preprocess_WF_DF.py \
+"${PYTHON}" 03-preprocess_WF_DF.py \
     ../02-data-collection/trafficsplitter-web-traces \
     trafficsplitter-web-tfrecord/
 
 echo
 
 echo "[INFO] BWR website traces..."
-python3 03-preprocess_WF_DF.py \
+"${PYTHON}" 03-preprocess_WF_DF.py \
     ../02-data-collection/bwr-web-traces \
     bwr-web-tfrecord/
 
@@ -180,7 +210,7 @@ echo "------------------------------------------------------------"
 run_training \
     TS_VF_ACC \
     trafficsplitter-vf-training.log \
-    python3 04-video-fingerprinting-CNN.py \
+    "${PYTHON}" 04-video-fingerprinting-CNN.py \
         trafficsplitter-video-tfrecord/ \
         trafficsplitter-vf-models/
 
@@ -193,7 +223,7 @@ echo "------------------------------------------------------------"
 run_training \
     BWR_VF_ACC \
     bwr-vf-training.log \
-    python3 04-video-fingerprinting-CNN.py \
+    "${PYTHON}" 04-video-fingerprinting-CNN.py \
         bwr-video-tfrecord/ \
         bwr-vf-models/
 
@@ -210,7 +240,7 @@ echo "------------------------------------------------------------"
 run_training \
     TS_WF_ACC \
     trafficsplitter-wf-training.log \
-    python3 05-web-fingerprinting-DF.py \
+    "${PYTHON}" 05-web-fingerprinting-DF.py \
         trafficsplitter-web-tfrecord/ \
         trafficsplitter-wf-models/
 
@@ -223,7 +253,7 @@ echo "------------------------------------------------------------"
 run_training \
     BWR_WF_ACC \
     bwr-wf-training.log \
-    python3 05-web-fingerprinting-DF.py \
+    "${PYTHON}" 05-web-fingerprinting-DF.py \
         bwr-web-tfrecord/ \
         bwr-wf-models/
 
