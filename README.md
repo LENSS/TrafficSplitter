@@ -9,7 +9,7 @@ This document provides instructions for the NDSS Artifact Evaluation (AE) proces
 
 To simplify the setup process, **we also provide pre-configured VMs as OVA files.**
 
-The OVA files are available here: [link]
+[**The pre-configured VMs (i.e., OVA files) are available here.**](https://drive.google.com/drive/folders/1m1C_Srb3HNnPgbd66ZxiAZ45eVDC5s2V?usp=sharing)
 
 **If you use the provided OVA files, you can skip the VM setup steps in Section 1 and proceed directly to [Section 2](#2-before-starting-the-evaluations).**
 
