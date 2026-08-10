@@ -715,3 +715,7 @@ TrafficSplitter is designed to provide broader protection against multiple traff
 In contrast, BWR is primarily designed as a website-fingerprinting defense. Its effectiveness is therefore expected to degrade more noticeably under the VF attack.
 
 The purpose of this scaled-down experiment is not to reproduce the exact numerical results from the paper, but to demonstrate the paper's key observation: **TrafficSplitter provides more comprehensive protection against different types of traffic-analysis attacks, whereas existing traffic-splitting defenses such as BWR are more attack-specific.**
+
+<p align="center">
+   <img src="img/ae-result.png" alt="cert config" width="400">
+</p>
