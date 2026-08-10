@@ -590,7 +590,7 @@ For BWR:
 
 ## 5.3 Collect Video Traces
 
-Similarly, collect video traces using:
+Similarly, collect video traces on the **client VM** using:
 
 ```bash
 ./02-data/collection/video-collecting.sh <trace-name>
