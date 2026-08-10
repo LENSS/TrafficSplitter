@@ -499,45 +499,57 @@ Optionally, you can run our BWR implementation with MPTun and eBPF instead of Tr
 
 > BWR does not use the Saflo subflow manager component.
 
-# (4) Evaluation Goal
+# (4) Scaled-Down Traffic-Analysis Evaluation
 
-In this AE, we conduct a scaled-down traffic-analysis evaluation using two defense configurations:
+This artifact evaluation compares two defense configurations:
 
 - **TrafficSplitter**
 - **BWR**
 
-The purpose of this evaluation is to demonstrate the difference between the two defenses:
+The goal is to reproduce, at a reduced scale, the main qualitative comparison reported in the paper. TrafficSplitter is designed to provide broader protection against both **website fingerprinting (WF)** and **video fingerprinting (VF)**, as well as other traffic-analysis attacks with characteristics between them. In contrast, BWR is a traffic-splitting defense designed primarily for **website fingerprinting** and is therefore used as an attack-specific baseline.
 
-- TrafficSplitter is designed to provide a more comprehensive defense against both **website fingerprinting (WF)** and **video fingerprinting (VF)**, as well as other traffic-analysis attacks that fall between them.
-- BWR is a traffic-splitting defense designed primarily for **website fingerprinting** and is therefore used as an attack-specific baseline (i.e., it is ineffective against VF).
+We assume a **single-path eavesdropper** that can monitor one of the network paths between the client and the MPTun proxy server. The eavesdropper is assumed to know the defense strategy and trains its attack classifier using traffic traces generated under each defense.
 
-We assume a **single-path eavesdropper** which can monitor one of paths between the user and tunneled-proxy. The eavesdropper is also aware of defense strategies and train its attack classifier on the traces generated under the defenses.
+The evaluation can be performed using either the **pre-collected traces included in the Git repository** or traces collected by the evaluator. If your goal is to verify the reproducibility of the traffic-analysis evaluation, you may use the pre-collected traces and skip directly to [Section 4.2](#42-run-the-scaled-down-traffic-analysis-evaluation).
 
-# (5) Collecting Traffic Traces
-Before conducting the traffic-analysis evaluation, we first prepare traffic traces.
+## 4.1 Prepare Traffic Traces
 
-We provide **pre-collected traffic traces that are already included in our git repository**. So, if your goal is to evaluate the reproducibility of our work or just simply test traffic analysis evaluation, you may skip this section and proceed directly to the [scaled-down traffic-analysis evaluation](#6-scaled-down-traffic-analysis-evaluation). You just need to unzip the pre-collected traces included in our git repository.
+### Option A: Use the Pre-Collected Traces
+
+The Git repository includes pre-collected website and video traces for both TrafficSplitter and BWR. To use them, move to the data-collection directory and extract the archives:
+
 ```bash
-sudo apt install unzip
+sudo apt install -y unzip
 cd ~/ndss27/TrafficSplitter/eval/02-data-collection
 unzip "*.zip"
 ```
-If you would like to collect traffic traces yourself or extend the provided dataset, you can follow the procedure below. We assume an eavesdropper monitoring the first network interface of the client VM; therefore, traffic is collected from this interface. The client generates traffic by visiting websites or playing YouTube videos in Google Chrome while `tcpdump` records the traffic.
 
+After extraction, the traces should be available in the following directories:
 
-## 5.1 Start the Defense Configuration
+```text
+TrafficSplitter/eval/02-data-collection/bwr-video-traces/
+TrafficSplitter/eval/02-data-collection/bwr-web-traces/
+TrafficSplitter/eval/02-data-collection/trafficsplitter-video-traces/
+TrafficSplitter/eval/02-data-collection/trafficsplitter-web-traces/
+```
 
-On both VMs, move to the evaluation directory:
+You may then proceed directly to [Section 4.2](#42-run-the-scaled-down-traffic-analysis-evaluation).
+
+### Option B: Collect New Traffic Traces
+
+If you would like to collect the traffic traces yourself or extend the provided dataset, follow the procedure below. We assume that the eavesdropper monitors the first network interface of the client VM. The client generates traffic by visiting websites or playing YouTube videos in Google Chrome, while `tcpdump` records the corresponding traffic.
+
+First, on both VMs, move to the evaluation directory:
 
 ```bash
 cd ~/ndss27/TrafficSplitter/eval
 ```
 
-As in Section (3), start the **server first**, followed by the **client**.
+As in Section (3), start the **proxy server first**, followed by the **client**.
 
-### TrafficSplitter
+#### TrafficSplitter
 
-On the proxy server VM:
+On the proxy-server VM:
 
 ```bash
 sudo ./01-run-func/run-trafficsplitter-server.sh
@@ -549,9 +561,9 @@ On the client VM:
 sudo ./01-run-func/run-trafficsplitter-client.sh
 ```
 
-### BWR
+#### BWR
 
-On the proxy server VM:
+On the proxy-server VM:
 
 ```bash
 sudo ./01-run-func/run-bwr-server.sh
@@ -563,17 +575,17 @@ On the client VM:
 sudo ./01-run-func/run-bwr-client.sh
 ```
 
-> BWR does not use the Saflo subflow manager component.
+> **Note:** BWR does not use the Saflo subflow-manager component.
 
-## 5.2 Collect Website Traces
+### Collect Website Traces
 
-Open a new terminal tab on the **client VM** and run:
+Open a new terminal on the **client VM** and run:
 
 ```bash
 ./02-data/collection/web-collecting.sh <trace-name>
 ```
 
-For example, when collecting traces with TrafficSplitter:
+For TrafficSplitter:
 
 ```bash
 ./02-data/collection/web-collecting.sh trafficsplitter
@@ -585,7 +597,7 @@ For BWR:
 ./02-data/collection/web-collecting.sh bwr
 ```
 
-## 5.3 Collect Video Traces
+### Collect Video Traces
 
 Similarly, collect video traces on the **client VM** using:
 
@@ -593,7 +605,7 @@ Similarly, collect video traces on the **client VM** using:
 ./02-data/collection/video-collecting.sh <trace-name>
 ```
 
-For example, when collecting traces with TrafficSplitter:
+For TrafficSplitter:
 
 ```bash
 ./02-data/collection/video-collecting.sh trafficsplitter
@@ -605,7 +617,7 @@ For BWR:
 ./02-data/collection/video-collecting.sh bwr
 ```
 
-## 5.4 Run Website and Video Collection Sequentially
+### Run Website and Video Collection Sequentially
 
 You may also run the website and video collection scripts sequentially.
 
@@ -623,15 +635,15 @@ For BWR:
 ./02-data/collection/video-collecting.sh bwr
 ```
 
-The second collection script starts only after the first one completes successfully.
+The second script starts only after the first script completes successfully.
 
-# (6) Scaled-Down Traffic-Analysis Evaluation
+## 4.2 Run the Scaled-Down Traffic-Analysis Evaluation
 
-This evaluation is conducted on the **client VM**, where the traffic traces are available.
+The traffic-analysis evaluation is conducted on the **client VM**, where the traffic traces are stored.
 
-## 6.1 Prerequisites
+### Prerequisites
 
-First, make sure the Python virtual environment is configured properly. If you imported the provided OVA files, it is already configured and you can skip this step. Otherwise, please create and activate a Python virtual environment:
+If you imported the provided OVA files, the required Python environment is already configured and you may skip this step. Otherwise, create and activate a Python virtual environment:
 
 ```bash
 sudo apt install -y python3-venv python3-full
@@ -644,23 +656,21 @@ source .venv/bin/activate
 python -m pip install --upgrade pip
 python -m pip install tensorflow pandas matplotlib
 ```
-`matplotlib` is optional and is only needed for plotting traces.
 
-Also, please make sure that the traffic traces are located in the following directory:
+`matplotlib` is optional and is required only for plotting traffic traces.
+
+Before running the evaluation, confirm that the TrafficSplitter and BWR website and video traces are available under:
 
 ```text
-TrafficSplitter/eval/02-data-collection/bwr-video-traces/
-TrafficSplitter/eval/02-data-collection/bwr-web-traces/
-TrafficSplitter/eval/02-data-collection/trafficsplitter-video-traces/
-TrafficSplitter/eval/02-data-collection/trafficsplitter-web-traces/
+TrafficSplitter/eval/02-data-collection/
 ```
 
-## 6.2 Run the Evaluation
+### Run the Evaluation
 
-Move to the traffic-analysis evaluation directory:
+Move to the traffic-analysis directory:
 
 ```bash
-cd ~/ndss2027/TrafficSplitter/eval/03-traffic-analysis
+cd ~/ndss27/TrafficSplitter/eval/03-traffic-analysis
 ```
 
 Then run:
@@ -677,7 +687,7 @@ The script automatically:
 4. trains and evaluates the video-fingerprinting classifier; and
 5. prints a summary table in the terminal.
 
-Please note that, because this AE uses a substantially smaller dataset than the full evaluation in the paper, we use **lighter versions of the WF and VF classifiers** to reduce training time and computational requirements on the VM.
+Because this artifact evaluation uses a substantially smaller dataset than the full evaluation reported in the paper, it uses **lighter versions of the WF and VF classifiers** to reduce training time and computational requirements on the VM.
 
 At the end of the evaluation, you should see a summary similar to:
 
@@ -694,7 +704,7 @@ Video Fingerprinting      | ...              | ...
 Values represent mean validation accuracy across the 5 folds.
 ```
 
-## 6.3 Clear Evaluation Results
+### Clear Evaluation Results
 
 After the evaluation, you can remove all generated TFRecords, trained models, and evaluation logs by running:
 
@@ -702,17 +712,15 @@ After the evaluation, you can remove all generated TFRecords, trained models, an
 ./run-traffic-analysis.sh --clear
 ```
 
-This command does **not** remove the original collected traffic traces.
+This command does **not** remove the original traffic traces.
 
-## 6.4 Result Interpretation
+## 4.3 Expected Result and Interpretation
 
-The exact accuracy values may differ from the full-scale results reported in the paper because this AE uses a much smaller dataset and lighter attack classifiers. However, the scaled-down evaluation is intended to reproduce the **main behavioral difference** between BWR and TrafficSplitter.
+The exact accuracy values may differ from the full-scale results reported in the paper because this artifact evaluation uses a smaller dataset and lighter attack classifiers. The goal is therefore not to reproduce the exact numerical values, but to reproduce the same **qualitative trend**.
 
-TrafficSplitter is designed to provide broader protection against multiple traffic-analysis attacks. Therefore, it should remain effective against both **website fingerprinting (WF)** and **video fingerprinting (VF)**.
+TrafficSplitter is designed to provide broader protection across different types of traffic-analysis attacks. It should therefore provide comparatively consistent protection under both **WF** and **VF**. In contrast, BWR is primarily designed as a website-fingerprinting defense, so its defense effectiveness is expected to degrade more noticeably under **VF**.
 
-In contrast, BWR is primarily designed as a website-fingerprinting defense. Its effectiveness is therefore expected to degrade more noticeably under the VF attack.
-
-The purpose of this scaled-down experiment is not to reproduce the exact numerical results from the paper, but to demonstrate the paper's key observation: **TrafficSplitter provides more comprehensive protection against different types of traffic-analysis attacks, whereas existing traffic-splitting defenses such as BWR are more attack-specific.**
+The key observation to reproduce is that **TrafficSplitter provides more comprehensive protection across WF and VF, whereas BWR is more attack-specific.**
 
 <p align="center">
    <img src="img/ae-result.png" alt="cert config" width="400">
