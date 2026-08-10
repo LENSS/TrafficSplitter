@@ -220,14 +220,19 @@ Please note that shell scripts are provided for the following procedure. You may
 After completing these steps on both VMs, proceed to the VirtualBox network configuration.
 
 # (2) Before Starting the Evaluations
-
 > If you are using the provided OVA files, the VM password is `ndss2027`.
+
+Before conducting experiments, we need to configure the NAT network for the communication between VMs. This configuration generates the network topology shown below.
+<p align="center">
+   <img src="img/net-topology.png" alt="cert config" width="600">
+</p>
+The client VM uses two network interfaces for MPTCP, while the proxy VM provides the remote MPTCP endpoint. Both VMs communicate through the VirtualBox `aeNet` NAT Network, and outbound traffic is forwarded through the host machine to the Internet.
 
 ## 2.1 NAT Network Setup
 
 We assume that you have already installed VirtualBox and prepared the two VMs either by following the VM setup instructions or by importing the OVA files provided with the artifact.
 
-Before starting the evaluation, create a VirtualBox NAT Network named `aeNet` on the **host machine**. This network enables communication between the client and proxy VMs.
+First, create a VirtualBox NAT Network named `aeNet` on the **host machine**. This network enables communication between the client and proxy VMs.
 
 The intended IP configuration is:
 
@@ -404,14 +409,6 @@ The expected IP address is:
 ```text
 NIC 1: 192.168.10.12
 ```
-
-## 2.3 Expected Network Topology
-
-This configuration generates the network topology shown below.
-<p align="center">
-   <img src="img/net-topology.png" alt="cert config" width="600">
-</p>
-The client VM uses two network interfaces for MPTCP, while the proxy VM provides the remote MPTCP endpoint. Both VMs communicate through the VirtualBox `aeNet` NAT Network, and outbound traffic is forwarded through the host machine to the Internet. In the following evaluations, we establish an MPTCP tunnel between the user and the proxy, collect network traces, and conduct a scaled-down traffic-analysis evaluation.
 
 # (3) Basic Functionality Test
 
