@@ -2,12 +2,12 @@
 
 This document provides instructions for the NDSS Artifact Evaluation (AE) process. The evaluation procedure is organized into four sections:
 
-1. **VM Setup:** We explain how to prepare the VMs for the artifact evaluation. This includes creating VirtualBox VMs, compiling the custom kernel, and building our system.
-2. **Before Starting the Evaluations:** We explain how to configure the VirtualBox NAT Network required for communication between the VMs before running the experiments.
-3. **Basic Functionality Test (E1):** We explain how to run our system on the VMs and verify its basic functionality.
-4. **Scaled-Down Traffic-Analysis Evaluation (E2):** We explain how to conduct the scaled-down traffic-analysis evaluation on the VMs. This includes collecting real network traffic, preprocessing the traffic traces, and training the attack classifiers.
+1. [VM Setup](https://github.com/LENSS/TrafficSplitter#1-vm-setup): We explain how to prepare the VMs for the artifact evaluation. This includes creating VirtualBox VMs, compiling the custom kernel, and building our system.
+2. [Before Starting the Evaluations](https://github.com/LENSS/TrafficSplitter#2-before-starting-the-evaluations): We explain how to configure the VirtualBox NAT Network required for communication between the VMs before running the experiments.
+3. [Basic Functionality Test (E1)](https://github.com/LENSS/TrafficSplitter#3-basic-functionality-test-e1): We explain how to run our system on the VMs and verify its basic functionality.
+4. [Scaled-Down Traffic-Analysis Evaluation (E2)](https://github.com/LENSS/TrafficSplitter#4-scaled-down-traffic-analysis-evaluation-e2): We explain how to conduct the scaled-down traffic-analysis evaluation on the VMs. This includes collecting real network traffic, preprocessing the traffic traces, and training the attack classifiers.
 
-To simplify the setup process, we also provide pre-configured VMs as OVA files.
+To simplify the setup process, **we also provide pre-configured VMs as OVA files.**
 
 The OVA files are available here: [link]
 
@@ -510,7 +510,7 @@ Optionally, you can run our BWR implementation with MPTun and eBPF instead of Tr
 
 > BWR does not use the Saflo subflow manager component.
 
-# (4) Scaled-Down Traffic-Analysis Evaluation
+# (4) Scaled-Down Traffic-Analysis Evaluation (E2)
 
 This artifact evaluation compares two defense configurations:
 
