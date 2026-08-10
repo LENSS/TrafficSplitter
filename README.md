@@ -634,27 +634,28 @@ This evaluation is conducted on the **client VM**, where the traffic traces are 
 
 ## 6.1 Prerequisites
 
-Before running the evaluation, make sure the required Python packages are installed:
+First, make sure the Python virtual environment is configured properly. If you imported the provided OVA files, it is already configured and you can skip this step. Otherwise, please create and activate a Python virtual environment:
 
 ```bash
-pip install tensorflow pandas matplotlib
+sudo apt install -y python3-venv python3-full
+
+cd ~/ndss27/TrafficSplitter/eval/03-traffic-analysis
+
+python3 -m venv .venv
+source .venv/bin/activate
+
+python -m pip install --upgrade pip
+python -m pip install tensorflow pandas matplotlib
 ```
+`matplotlib` is optional and is only needed for plotting traces.
 
-`matplotlib` is optional and is only needed for plotting or inspecting traces.
-
-The extracted traffic traces should be located under:
+Also, please make sure that the traffic traces are located in the following directory:
 
 ```text
-~/ndss2027/TrafficSplitter/eval/02-data-collection/
-```
-
-For example, the traffic traces should be organized into the following directories:
-
-```text
-bwr-video-traces
-bwr-web-traces
-trafficsplitter-video-traces
-trafficsplitter-web-traces
+TrafficSplitter/eval/02-data-collection/bwr-video-traces/
+TrafficSplitter/eval/02-data-collection/bwr-web-traces/
+TrafficSplitter/eval/02-data-collection/trafficsplitter-video-traces/
+TrafficSplitter/eval/02-data-collection/trafficsplitter-web-traces/
 ```
 
 ## 6.2 Run the Evaluation
