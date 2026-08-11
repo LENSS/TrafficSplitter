@@ -483,7 +483,9 @@ After the client connects to the proxy, you should observe that the MPTCP tunnel
 
 ## 3.4 Observe Traffic Distribution
 
-You can additionally inspect how traffic is distributed across the two client interfaces using Wireshark.
+You can now observe how traffic is distributed across the two client network paths.
+
+### Option A: Wireshark
 
 On the **client VM**, open another terminal tab and run:
 
@@ -493,12 +495,28 @@ sudo wireshark
 
 In Wireshark, monitor both client network interfaces.
 
-Then, open Firefox and generate some traffic, for example by:
+Then, open Firefox and generate traffic, for example by:
 
-- visiting several websites; or
-- playing an online video.
+* visiting several websites; or
+* playing an online video.
 
-Observe how MPTCP traffic is distributed across the two network interfaces.
+Observe how the MPTCP traffic is distributed across the two network interfaces.
+
+### Option B: Interface Traffic Script
+
+On the **client VM**, open another terminal tab and run:
+
+```bash
+./01-run-func/show-interface-traffic.sh 20
+```
+
+Then, open Firefox and generate traffic, for example by:
+
+* visiting several websites; or
+* playing an online video.
+
+Run the script multiple times while generating traffic. You should observe that the traffic distribution ratio between the two paths varies across measurements due to the randomness introduced by our traffic-obfuscation strategy.
+
 
 ## 3.5 Expected Result
 
