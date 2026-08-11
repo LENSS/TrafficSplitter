@@ -11,7 +11,13 @@ To simplify the setup process, **we also provide pre-configured VMs as OVA files
 
 [**The pre-configured VMs (i.e., OVA files) are available here.**](https://drive.google.com/drive/folders/1m1C_Srb3HNnPgbd66ZxiAZ45eVDC5s2V?usp=sharing)
 
-**If you use the provided OVA files, you can skip the VM setup steps in Section 1 and proceed directly to [Section 2](#2-before-starting-the-evaluations).**
+**If you use the provided OVA files, please note the following:**
+
+* You can import each VM into VirtualBox by selecting **File > Import Appliance** and choosing the provided OVA file.
+* The VM password is `ndss2027`.
+* When you boot the VMs, the GRUB menu will appear and prompt you to select a kernel version. You can either wait approximately 10 seconds, in which case GRUB will boot the previously selected kernel, or manually select the custom kernel under **Advanced options for Ubuntu > Linux 6.13.0-rc3+**.
+
+Once you have imported the VMs from the OVA files, you can skip the VM setup steps in Section 1 and proceed directly to [Section 2](#2-before-starting-the-evaluations).
 
 # (1) VM Setup
 
@@ -231,7 +237,6 @@ Please note that shell scripts are provided for the following procedure. You may
 After completing these steps on both VMs, proceed to the VirtualBox network configuration.
 
 # (2) Before Starting the Evaluations
-> If you are using the provided OVA files, the VM password is `ndss2027`.
 
 Before conducting experiments, we need to configure the NAT network for the communication between VMs. This configuration generates the network topology shown below.
 <p align="center">
