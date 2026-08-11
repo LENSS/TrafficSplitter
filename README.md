@@ -18,6 +18,7 @@ To simplify the setup process, **we also provide pre-configured VMs as OVA files
 * When you boot the VMs, the GRUB menu will appear and prompt you to select a kernel version. You can either wait approximately 10 seconds, in which case GRUB will boot the previously selected kernel, or manually select the custom kernel under **Advanced options for Ubuntu > Linux 6.13.0-rc3+**.
 
 Once you have imported the VMs from the OVA files, you can skip the VM setup steps in Section 1 and proceed directly to [Section 2](#2-before-starting-the-evaluations).
+> **While our goal was to provide a self-contained evaluation environment and workflow, we plan to release the full dataset and scripts used to produce the results reported in our paper soon.**
 
 # (1) VM Setup
 
