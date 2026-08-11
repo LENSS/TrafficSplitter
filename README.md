@@ -630,6 +630,7 @@ For BWR:
 ```bash
 ./02-data/collection/web-collecting.sh bwr
 ```
+The script automatically opens the 10 websites specified in the shell script while `tcpdump` captures the corresponding network traffic.
 
 ### Collect Video Traces
 
@@ -650,6 +651,8 @@ For BWR:
 ```bash
 ./02-data/collection/video-collecting.sh bwr
 ```
+The script automatically plays the five YouTube videos specified in the shell script while `tcpdump` captures the corresponding network traffic.
+> **Note:** The provided traces were collected using a YouTube Premium account to avoid advertisements that could introduce additional traffic unrelated to the target videos.
 
 ### Run Website and Video Collection Sequentially
 
