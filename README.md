@@ -1,6 +1,6 @@
 # Introduction
 
-This document provides instructions for the NDSS Artifact Evaluation (AE) process. The evaluation procedure is organized into four sections:
+This document provides instructions for the NDSS Artifact Evaluation (AE) process for our paper, _Towards Comprehensive Multipath Obfuscation Against Traffic Analysis Attacks in Wireless Networks_. The evaluation procedure is organized into four sections:
 
 1. [VM Setup](https://github.com/LENSS/TrafficSplitter#1-vm-setup): We explain how to prepare the VMs for the artifact evaluation. This includes creating VirtualBox VMs, compiling the custom kernel, and building our system.
 2. [Before Starting the Evaluations](https://github.com/LENSS/TrafficSplitter#2-before-starting-the-evaluations): We explain how to configure the VirtualBox NAT Network required for communication between the VMs before running the experiments.
