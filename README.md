@@ -441,7 +441,7 @@ cd ~/ndss27/TrafficSplitter/eval
 
 Prepare **two terminal tabs** on each VM:
 
-- **Tab 1:** Run the evaluation script.
+- **Tab 1:** Run the system.
 - **Tab 2:** Monitor the Saflo subflow manager log.
 
 ## 3.2 Start the Proxy Server
